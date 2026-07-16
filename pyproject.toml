@@ -1,0 +1,65 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "darkhunt-telemetry"
+version = "0.5.5"
+description = "Python SDK for sending LLM traces, generations, and observations to the Darkhunt platform for persistence and security data enrichment. Built on OpenTelemetry primitives, with built-in client-side data masking."
+readme = "README.md"
+license = "Apache-2.0"
+requires-python = ">=3.9"
+authors = [{ name = "Darkhunt Security, Inc." }]
+keywords = [
+    "opentelemetry",
+    "otel",
+    "otlp",
+    "llm",
+    "observability",
+    "tracing",
+    "data-masking",
+    "pii",
+]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Intended Audience :: Developers",
+    "License :: OSI Approved :: Apache Software License",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.9",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Topic :: Software Development :: Libraries :: Python Modules",
+    "Typing :: Typed",
+]
+dependencies = [
+    "opentelemetry-api>=1.20.0",
+    "opentelemetry-sdk>=1.20.0",
+    "opentelemetry-exporter-otlp-proto-common>=1.20.0",
+    "requests>=2.25.0",
+]
+
+[project.optional-dependencies]
+# Optional Temporal handoff propagation (interceptors). Install with
+#   pip install "darkhunt-telemetry[temporal]"
+temporal = ["temporalio>=1.4.0"]
+# Development / test tooling.
+dev = [
+    "pytest>=7.0",
+    "pyyaml>=6.0",
+]
+
+[project.urls]
+Homepage = "https://github.com/darkhunt-security/darkhunt-telemetry-python#readme"
+Repository = "https://github.com/darkhunt-security/darkhunt-telemetry-python"
+Issues = "https://github.com/darkhunt-security/darkhunt-telemetry-python/issues"
+
+[tool.hatch.build.targets.wheel]
+packages = ["darkhunt_telemetry"]
+
+[tool.hatch.build.targets.wheel.force-include]
+"darkhunt_telemetry/masking/rules/rules.json" = "darkhunt_telemetry/masking/rules/rules.json"
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
