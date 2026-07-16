@@ -16,9 +16,7 @@ _STRIP = re.compile(r"[\s-]")
 
 def credit_card(input: str) -> bool:
     digits = _STRIP.sub("", input)
-    return (
-        13 <= len(digits) <= 16 and _has_valid_iin(digits) and luhn(digits)
-    )
+    return 13 <= len(digits) <= 16 and _has_valid_iin(digits) and luhn(digits)
 
 
 def _has_valid_iin(d: str) -> bool:

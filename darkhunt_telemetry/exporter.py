@@ -74,7 +74,7 @@ class DarkhuntSpanExporter(SpanExporter):
         self._shutdown_called = True
         try:
             self._session.close()
-        except Exception:  # pragma: no cover
+        except Exception:  # nosec B110 - best-effort close; nothing to recover  # pragma: no cover
             pass
 
     def force_flush(self, timeout_millis: int = 30_000) -> bool:
@@ -93,9 +93,7 @@ class DarkhuntSpanExporter(SpanExporter):
                 failed = True
         return SpanExportResult.FAILURE if failed else SpanExportResult.SUCCESS
 
-    def _group_by_route(
-        self, spans: Sequence[ReadableSpan]
-    ) -> Dict[str, tuple]:
+    def _group_by_route(self, spans: Sequence[ReadableSpan]) -> Dict[str, tuple]:
         groups: Dict[str, tuple] = {}
         for span in spans:
             route = self._extract_route(span)
@@ -169,9 +167,7 @@ class DarkhuntSpanExporter(SpanExporter):
         backoff = _INITIAL_BACKOFF_MS
         for attempt in range(_MAX_RETRIES):
             try:
-                resp = self._session.post(
-                    url, headers=headers, data=body, timeout=self._timeout_s
-                )
+                resp = self._session.post(url, headers=headers, data=body, timeout=self._timeout_s)
                 if resp.ok:
                     return True
                 if resp.status_code not in _RETRYABLE_STATUS:

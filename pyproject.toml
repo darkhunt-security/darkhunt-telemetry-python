@@ -54,6 +54,7 @@ dev = [
     "ruff>=0.6",
     "mypy>=1.8",
     "types-requests>=2.25",
+    "bandit>=1.7",
 ]
 
 [project.urls]
@@ -101,3 +102,7 @@ warn_redundant_casts = true
 [[tool.mypy.overrides]]
 module = "darkhunt_telemetry.temporal.*"
 disallow_untyped_defs = false
+
+[tool.bandit]
+# Scan the package only; tests use asserts/fixtures that trip low-value checks.
+exclude_dirs = ["tests"]

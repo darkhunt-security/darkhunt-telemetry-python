@@ -109,11 +109,14 @@ def _build_repl(marker: str, validator: Optional[Validator]) -> _Repl:
     confirms the match.
     """
     if validator is None:
+
         def repl(m: "re.Match[str]") -> str:
             return marker
     else:
+
         def repl(m: "re.Match[str]") -> str:
             return marker if validator(m.group(0)) else m.group(0)
+
     return repl
 
 
@@ -247,9 +250,7 @@ def safe_json_dumps(value: Any) -> str:
     try:
         return json.dumps(value, default=_json_default, ensure_ascii=False)
     except (TypeError, ValueError) as err:
-        warnings.warn(
-            f"darkhunt-telemetry: failed to JSON-encode value: {err}", stacklevel=2
-        )
+        warnings.warn(f"darkhunt-telemetry: failed to JSON-encode value: {err}", stacklevel=2)
         return f"[unserializable: {err}]"
 
 

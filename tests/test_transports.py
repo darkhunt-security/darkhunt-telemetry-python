@@ -47,10 +47,7 @@ def test_queue_round_trip():
 
 def test_queue_coerces_bytes_and_sqs_wrapper():
     assert handoff_from_message_meta({HANDOFF_MESSAGE_META_KEY: TOKEN.encode()}) == TOKEN
-    assert (
-        handoff_from_message_meta({HANDOFF_MESSAGE_META_KEY: {"StringValue": TOKEN}})
-        == TOKEN
-    )
+    assert handoff_from_message_meta({HANDOFF_MESSAGE_META_KEY: {"StringValue": TOKEN}}) == TOKEN
 
 
 def test_queue_fan_in_dedupes_and_orders():

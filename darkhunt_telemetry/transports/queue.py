@@ -45,9 +45,7 @@ def _read_handoff_key(meta: Mapping[str, Any]) -> Any:
     return None
 
 
-def handoff_to_message_meta(
-    token: str, meta: Optional[Mapping[str, str]] = None
-) -> Dict[str, str]:
+def handoff_to_message_meta(token: str, meta: Optional[Mapping[str, str]] = None) -> Dict[str, str]:
     """Merge a handoff token onto a message's metadata under
     :data:`HANDOFF_MESSAGE_META_KEY`, returning a new dict (input not mutated).
     The value is a plain string — Kafka accepts string header values directly;

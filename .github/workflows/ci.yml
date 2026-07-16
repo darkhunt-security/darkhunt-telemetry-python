@@ -12,8 +12,8 @@ permissions:
 
 jobs:
   lint:
-    # Static analysis: ruff (lint + import order) and mypy (type-check the
-    # package we ship types for). Runs once — no version matrix needed.
+    # Static analysis: ruff (lint + format), mypy (type-check the package we ship
+    # types for), and bandit (security). Runs once — no version matrix needed.
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -26,8 +26,12 @@ jobs:
           pip install -e ".[dev,temporal]"
       - name: ruff (lint)
         run: ruff check darkhunt_telemetry tests
+      - name: ruff (format check)
+        run: ruff format --check darkhunt_telemetry tests
       - name: mypy (type-check)
         run: mypy
+      - name: bandit (security)
+        run: bandit -c pyproject.toml -r darkhunt_telemetry
 
   test:
     runs-on: ubuntu-latest

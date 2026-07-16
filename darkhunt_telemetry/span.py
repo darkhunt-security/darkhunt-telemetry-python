@@ -270,9 +270,7 @@ class ActiveChildHost:
             context_api.detach(token)
 
     @contextmanager
-    def start_active_generation(
-        self, name: str, **options: Any
-    ) -> Iterator["Generation"]:
+    def start_active_generation(self, name: str, **options: Any) -> Iterator["Generation"]:
         """Active-context counterpart of :meth:`generation` — see
         :meth:`start_active_span`."""
         gen = self.generation(name, **options)

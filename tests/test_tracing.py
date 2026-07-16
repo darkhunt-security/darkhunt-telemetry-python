@@ -151,9 +151,7 @@ def test_client_requires_routing_fields():
 
 
 def test_client_merges_routing_defaults():
-    dh = DarkhuntTelemetry(
-        enabled=False, tenant_id="t", workspace_id="w", application_id="a"
-    )
+    dh = DarkhuntTelemetry(enabled=False, tenant_id="t", workspace_id="w", application_id="a")
     tr = dh.trace("x", session_id="s")
     assert tr.tenant_id == "t"
     assert tr.workspace_id == "w"
@@ -162,9 +160,7 @@ def test_client_merges_routing_defaults():
 
 
 def test_per_trace_routing_overrides_default():
-    dh = DarkhuntTelemetry(
-        enabled=False, tenant_id="t", workspace_id="w", application_id="a"
-    )
+    dh = DarkhuntTelemetry(enabled=False, tenant_id="t", workspace_id="w", application_id="a")
     tr = dh.trace("x", tenant_id="other")
     assert tr.tenant_id == "other"
 
@@ -177,9 +173,7 @@ def test_public_endpoint_requires_api_key(monkeypatch):
 
 def test_internal_endpoint_needs_no_api_key(monkeypatch):
     monkeypatch.delenv("DARKHUNT_API_KEY", raising=False)
-    dh = DarkhuntTelemetry(
-        internal=True, tenant_id="t", workspace_id="w", application_id="a"
-    )
+    dh = DarkhuntTelemetry(internal=True, tenant_id="t", workspace_id="w", application_id="a")
     assert dh.enabled
     dh.shutdown()
 

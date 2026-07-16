@@ -138,9 +138,7 @@ class HandoffInterceptor(Interceptor):
                         interceptors=[HandoffInterceptor()])
     """
 
-    def intercept_activity(
-        self, next: ActivityInboundInterceptor
-    ) -> ActivityInboundInterceptor:
+    def intercept_activity(self, next: ActivityInboundInterceptor) -> ActivityInboundInterceptor:
         return _HandoffActivityInbound(next)
 
     def workflow_interceptor_class(

@@ -53,7 +53,7 @@ def test_ssn_ascii_masked_but_unicode_digits_not():
     assert "[SSN]" not in s.sanitize(arabic_ssn)
 
     # Same shape spelled with fullwidth digits U+FF11..U+FF19.
-    fullwidth_ssn = "\uFF11\uFF12\uFF13-\uFF14\uFF15-\uFF16\uFF17\uFF18\uFF19"
+    fullwidth_ssn = "\uff11\uff12\uff13-\uff14\uff15-\uff16\uff17\uff18\uff19"
     assert s.sanitize(fullwidth_ssn) == fullwidth_ssn
     assert "[SSN]" not in s.sanitize(fullwidth_ssn)
 
@@ -62,8 +62,6 @@ def test_custom_pattern_semantics_preserved():
     # Custom patterns keep the user's chosen semantics -- the SDK does NOT force
     # them to ASCII. A plain ASCII match works as the user intended.
     s = Sanitizer(
-        custom_patterns=[
-            CustomPattern(regex=r"\d+id", marker="[X]", case_sensitive=True)
-        ]
+        custom_patterns=[CustomPattern(regex=r"\d+id", marker="[X]", case_sensitive=True)]
     )
     assert s.sanitize("42id") == "[X]"

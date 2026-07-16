@@ -14,7 +14,9 @@ implementation of the Keccak sponge with rate 1088 / capacity 512.
 from __future__ import annotations
 
 try:  # Prefer a vetted implementation when pycryptodome is available.
-    from Crypto.Hash import keccak as _pyc_keccak  # pycryptodome
+    # nosec B413 — this is pycryptodome (actively maintained), NOT the abandoned
+    # pyCrypto; pycryptodome deliberately reuses the `Crypto` import namespace.
+    from Crypto.Hash import keccak as _pyc_keccak  # nosec B413
 
     def _vetted(data: bytes) -> bytes:
         return _pyc_keccak.new(digest_bits=256, data=data).digest()
@@ -24,14 +26,30 @@ except Exception:  # pragma: no cover - depends on optional dependency
     _HAVE_VETTED = False
 
 _ROUND_CONSTANTS = [
-    0x0000000000000001, 0x0000000000008082, 0x800000000000808A,
-    0x8000000080008000, 0x000000000000808B, 0x0000000080000001,
-    0x8000000080008081, 0x8000000000008009, 0x000000000000008A,
-    0x0000000000000088, 0x0000000080008009, 0x000000008000000A,
-    0x000000008000808B, 0x800000000000008B, 0x8000000000008089,
-    0x8000000000008003, 0x8000000000008002, 0x8000000000000080,
-    0x000000000000800A, 0x800000008000000A, 0x8000000080008081,
-    0x8000000000008080, 0x0000000080000001, 0x8000000080008008,
+    0x0000000000000001,
+    0x0000000000008082,
+    0x800000000000808A,
+    0x8000000080008000,
+    0x000000000000808B,
+    0x0000000080000001,
+    0x8000000080008081,
+    0x8000000000008009,
+    0x000000000000008A,
+    0x0000000000000088,
+    0x0000000080008009,
+    0x000000008000000A,
+    0x000000008000808B,
+    0x800000000000008B,
+    0x8000000000008089,
+    0x8000000000008003,
+    0x8000000000008002,
+    0x8000000000000080,
+    0x000000000000800A,
+    0x800000008000000A,
+    0x8000000080008081,
+    0x8000000000008080,
+    0x0000000080000001,
+    0x8000000080008008,
 ]
 
 _ROTATION_OFFSETS = [
@@ -93,9 +111,9 @@ def _keccak_256_pure(data: bytes) -> bytes:
 
     state = [[0] * 5 for _ in range(5)]
     for offset in range(0, len(padded), rate_bytes):
-        block = padded[offset:offset + rate_bytes]
+        block = padded[offset : offset + rate_bytes]
         for i in range(rate_bytes // 8):
-            lane = int.from_bytes(block[i * 8:i * 8 + 8], "little")
+            lane = int.from_bytes(block[i * 8 : i * 8 + 8], "little")
             state[i % 5][i // 5] ^= lane
         _keccak_f(state)
 

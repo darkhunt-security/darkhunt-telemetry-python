@@ -46,7 +46,7 @@ def _atexit_handler() -> None:
     for dh in tuple(_active_instances):
         try:
             dh.shutdown()
-        except Exception:  # pragma: no cover - shutdown already swallows
+        except Exception:  # nosec B110 - shutdown already swallows  # pragma: no cover
             pass
 
 
@@ -156,10 +156,7 @@ class DarkhuntTelemetry:
         # ``or`` (not a None-check) so an empty-string env var falls through to
         # the next source instead of producing an empty service.name.
         resolved_service_name = (
-            service_name
-            or _env("DARKHUNT_SERVICE_NAME")
-            or _env("OTEL_SERVICE_NAME")
-            or LIB_NAME
+            service_name or _env("DARKHUNT_SERVICE_NAME") or _env("OTEL_SERVICE_NAME") or LIB_NAME
         )
 
         self._provider: Optional[TracerProvider] = None
@@ -227,9 +224,7 @@ class DarkhuntTelemetry:
         is still missing."""
         merged_tenant = tenant_id if tenant_id is not None else self._tenant_id
         merged_workspace = workspace_id if workspace_id is not None else self._workspace_id
-        merged_application = (
-            application_id if application_id is not None else self._application_id
-        )
+        merged_application = application_id if application_id is not None else self._application_id
         merged_assessment = (
             assessment_run_id if assessment_run_id is not None else self._assessment_run_id
         )
@@ -308,9 +303,7 @@ class DarkhuntTelemetry:
         flush_interval_ms: float,
         timeout_ms: float,
     ) -> None:
-        resource = Resource.create(
-            {SERVICE_NAME: service_name, SERVICE_VERSION: LIB_VERSION}
-        )
+        resource = Resource.create({SERVICE_NAME: service_name, SERVICE_VERSION: LIB_VERSION})
         exporter = DarkhuntSpanExporter(
             base_url=base_url,
             api_key=api_key,
