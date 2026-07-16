@@ -1,4 +1,6 @@
-# Runs the test suite on every push / PR across supported Python versions.
+# Runs lint/type/security checks and the test suite on every push / PR.
+# Uses uv (astral-sh) for fast, reproducible installs from uv.lock. The build
+# backend stays hatchling; `uv build` just drives it.
 name: CI
 
 on:
@@ -17,21 +19,19 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      - uses: astral-sh/setup-uv@v6
         with:
-          python-version: "3.12"
-      - name: Install (with dev + temporal extras)
-        run: |
-          python -m pip install --upgrade pip
-          pip install -e ".[dev,temporal]"
+          enable-cache: true
+      - name: Install (locked, all extras)
+        run: uv sync --locked --all-extras --python 3.12
       - name: ruff (lint)
-        run: ruff check darkhunt_telemetry tests
+        run: uv run ruff check darkhunt_telemetry tests
       - name: ruff (format check)
-        run: ruff format --check darkhunt_telemetry tests
+        run: uv run ruff format --check darkhunt_telemetry tests
       - name: mypy (type-check)
-        run: mypy
+        run: uv run mypy
       - name: bandit (security)
-        run: bandit -c pyproject.toml -r darkhunt_telemetry
+        run: uv run bandit -c pyproject.toml -r darkhunt_telemetry
 
   test:
     runs-on: ubuntu-latest
@@ -41,33 +41,24 @@ jobs:
         python-version: ["3.9", "3.10", "3.11", "3.12", "3.13"]
     steps:
       - uses: actions/checkout@v4
-
-      - name: Set up Python ${{ matrix.python-version }}
-        uses: actions/setup-python@v5
+      - uses: astral-sh/setup-uv@v6
         with:
-          python-version: ${{ matrix.python-version }}
-
-      - name: Install (with dev + temporal extras)
-        run: |
-          python -m pip install --upgrade pip
-          pip install -e ".[dev,temporal]"
-
+          enable-cache: true
+      - name: Install (locked, all extras) on Python ${{ matrix.python-version }}
+        run: uv sync --locked --all-extras --python ${{ matrix.python-version }}
       - name: Run tests
-        run: pytest -q
+        run: uv run pytest -q
 
   build:
-    # Prove the package builds and the wheel is installable from a clean env.
+    # Prove the package builds (sdist + wheel via hatchling) and passes metadata
+    # checks. `uv build` invokes the PEP 517 backend declared in pyproject.
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      - uses: astral-sh/setup-uv@v6
         with:
-          python-version: "3.12"
+          enable-cache: true
       - name: Build sdist + wheel
-        run: |
-          python -m pip install --upgrade pip build
-          python -m build
+        run: uv build
       - name: Check metadata
-        run: |
-          pip install twine
-          twine check dist/*
+        run: uvx twine check dist/*

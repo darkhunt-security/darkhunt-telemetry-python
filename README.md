@@ -284,6 +284,20 @@ misconfiguration. Connecting them is an *architecture change* (carry a
 
 ## Development
 
+Uses [uv](https://docs.astral.sh/uv/) for a fast, reproducible dev environment
+(pinned by `uv.lock`); the build backend is hatchling.
+
+```bash
+uv sync --all-extras          # create .venv from the lockfile (dev + temporal + crypto)
+uv run pytest                 # tests
+uv run ruff check . && uv run ruff format --check .
+uv run mypy
+uv run bandit -c pyproject.toml -r darkhunt_telemetry
+uv build                      # sdist + wheel
+```
+
+Plain pip works too, if you'd rather not use uv:
+
 ```bash
 python -m venv .venv && source .venv/bin/activate
 pip install -e ".[dev,temporal]"
