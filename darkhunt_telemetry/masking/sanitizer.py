@@ -8,18 +8,13 @@ leaves the process.
 from __future__ import annotations
 
 import json
+import os
 import re
-import sys
 import warnings
 from dataclasses import dataclass
 from typing import Any, List, Optional, Pattern, Sequence
 
 from .validators import VALIDATORS, Validator
-
-if sys.version_info >= (3, 9):
-    from importlib.resources import files as _resource_files
-else:  # pragma: no cover
-    from importlib_resources import files as _resource_files  # type: ignore
 
 
 @dataclass
@@ -75,9 +70,30 @@ def _assert_not_pathological(regex: str, name: Optional[str]) -> None:
 
 
 def _load_defaults() -> dict:
-    text = _resource_files("darkhunt_telemetry.masking.rules").joinpath("rules.json").read_text(
-        encoding="utf-8"
-    )
+    """Load the bundled ``rules.json`` shipped next to this module.
+
+    Anchor on the *real* package ``darkhunt_telemetry.masking`` (which has an
+    ``__init__.py``) and descend into ``rules/rules.json`` — never import the
+    ``rules`` directory as a package. That directory has no ``__init__.py``, so
+    treating it as a namespace subpackage breaks under some editable-install
+    finders (``importlib.resources.files`` hits a ``None`` search location and
+    raises ``TypeError: expected str, bytes or os.PathLike object, not NoneType``).
+    Falls back to a ``__file__``-relative read, which is correct for any
+    unzipped install.
+    """
+    try:
+        from importlib.resources import files as _resource_files
+
+        text = (
+            _resource_files("darkhunt_telemetry.masking")
+            .joinpath("rules")
+            .joinpath("rules.json")
+            .read_text(encoding="utf-8")
+        )
+    except Exception:
+        path = os.path.join(os.path.dirname(__file__), "rules", "rules.json")
+        with open(path, encoding="utf-8") as fh:
+            text = fh.read()
     return json.loads(text)
 
 
