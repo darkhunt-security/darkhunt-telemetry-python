@@ -26,11 +26,6 @@ def _make_span(tracer, **routing):
 
 def _spans_for(**routing):
     """Produce one finished ReadableSpan with the given routing attributes."""
-    captured = []
-
-    class _Cap(SimpleSpanProcessor):
-        pass
-
     from opentelemetry.sdk.trace.export.in_memory_span_exporter import (
         InMemorySpanExporter,
     )

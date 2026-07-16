@@ -13,12 +13,11 @@ on:
   release:
     types: [published]
 
-permissions:
-  contents: read
-
 jobs:
   build:
     runs-on: ubuntu-latest
+    permissions:
+      contents: read # least privilege: only this job checks out code
     steps:
       - uses: actions/checkout@v4
 

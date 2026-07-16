@@ -54,7 +54,7 @@ def _is_mastercard(d: str, length: int) -> bool:
 
 def _is_amex(d: str, length: int) -> bool:
     """Amex: 34 or 37, length 15."""
-    return length == 15 and (d.startswith("34") or d.startswith("37"))
+    return length == 15 and d.startswith(("34", "37"))
 
 
 def _is_diners(d: str, length: int) -> bool:
@@ -63,7 +63,7 @@ def _is_diners(d: str, length: int) -> bool:
         return False
     if d.startswith("30"):
         return "0" <= d[2] <= "5"
-    return d.startswith("36") or d.startswith("38")
+    return d.startswith(("36", "38"))
 
 
 def _is_jcb(d: str, length: int) -> bool:

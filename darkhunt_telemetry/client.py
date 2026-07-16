@@ -41,8 +41,8 @@ def _ensure_atexit_handler() -> None:
 
 
 def _atexit_handler() -> None:
-    # Iterate a copy: shutdown() mutates the live set.
-    for dh in list(_active_instances):
+    # Iterate a snapshot: shutdown() mutates the live set.
+    for dh in tuple(_active_instances):
         try:
             dh.shutdown()
         except Exception:  # pragma: no cover - shutdown already swallows

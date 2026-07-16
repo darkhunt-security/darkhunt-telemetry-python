@@ -20,9 +20,16 @@ from darkhunt_telemetry.masking.validators import (
 
 
 def _rules():
-    return json.loads(
-        files("darkhunt_telemetry.masking.rules").joinpath("rules.json").read_text()
+    # Anchor on the real package (never the __init__-less ``rules`` namespace
+    # subdir, which breaks importlib.resources on some Pythons — see
+    # sanitizer._load_defaults).
+    text = (
+        files("darkhunt_telemetry.masking")
+        .joinpath("rules")
+        .joinpath("rules.json")
+        .read_text(encoding="utf-8")
     )
+    return json.loads(text)
 
 
 def test_all_bundled_examples_are_masked():
@@ -97,8 +104,11 @@ def test_custom_pattern_merged_after_defaults():
 
 
 def test_pathological_custom_pattern_rejected():
+    # Build the pattern outside the raises block so only the Sanitizer call
+    # (the one expected to throw) is under assertion.
+    bad = [CustomPattern(regex=r"(\w+)+", marker="[X]")]
     with pytest.raises(ValueError):
-        Sanitizer(custom_patterns=[CustomPattern(regex=r"(\w+)+", marker="[X]")])
+        Sanitizer(custom_patterns=bad)
 
 
 def test_ruleset_version_exposed():

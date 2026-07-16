@@ -101,7 +101,7 @@ class _HandoffWorkflowOutbound(WorkflowOutboundInterceptor):
 
     async def start_child_workflow(self, input: StartChildWorkflowInput):
         args = list(input.args or [])
-        first = args[0] if args else None
+        first = next(iter(args), None)
         override = first.get(HANDOFF_META) if isinstance(first, dict) else None
         if override:
             # Per-edge override: relocate to the header and strip it from args.

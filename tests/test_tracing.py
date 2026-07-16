@@ -83,7 +83,7 @@ def test_metadata_one_attr_per_key(mem):
     s.end()
     t.end()
     (span,) = mem.by_name("work")
-    assert span.attributes[ATTR.METADATA_PREFIX + "score"] == 0.9
+    assert span.attributes[ATTR.METADATA_PREFIX + "score"] == pytest.approx(0.9)
     assert span.attributes[ATTR.METADATA_PREFIX + "passed"] is True
     assert span.attributes[ATTR.METADATA_PREFIX + "label"] == "x"
 
@@ -114,7 +114,7 @@ def test_nested_span_parenting(mem):
 
 def test_start_active_span_auto_nests_and_times(mem):
     t = _trace(mem)
-    with t.start_active_span("outer") as outer:
+    with t.start_active_span("outer"):
         # A plain OTel span opened via the tracer with no explicit parent should
         # nest under the active span.
         inner = mem.tracer.start_span("ambient-child")
@@ -129,9 +129,13 @@ def test_start_active_span_marks_error_on_exception(mem):
     from opentelemetry.trace import StatusCode
 
     t = _trace(mem)
-    with pytest.raises(RuntimeError):
+
+    def _run_failing():
         with t.start_active_span("will-fail"):
             raise RuntimeError("nope")
+
+    with pytest.raises(RuntimeError):
+        _run_failing()
     t.end()
     (span,) = mem.by_name("will-fail")
     assert span.status.status_code == StatusCode.ERROR
