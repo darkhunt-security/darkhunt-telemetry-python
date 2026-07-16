@@ -12,7 +12,7 @@ from __future__ import annotations
 import math
 import warnings
 from contextlib import contextmanager
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any, Dict, Iterator, List, Optional, Sequence
 
 from opentelemetry import context as context_api
@@ -21,11 +21,13 @@ from opentelemetry.context import Context
 from opentelemetry.trace import (
     Link,
     NonRecordingSpan,
-    Span as OtelSpan,
     SpanContext,
     Status,
     StatusCode,
     TraceFlags,
+)
+from opentelemetry.trace import (
+    Span as OtelSpan,
 )
 from opentelemetry.trace.propagation.tracecontext import TraceContextTextMapPropagator
 

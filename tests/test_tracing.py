@@ -6,7 +6,7 @@ import json
 
 import pytest
 
-from darkhunt_telemetry import DarkhuntTelemetry, MaskingOptions
+from darkhunt_telemetry import DarkhuntTelemetry
 from darkhunt_telemetry.attributes import ATTR, GEN_AI
 from darkhunt_telemetry.trace import Trace
 

@@ -101,7 +101,10 @@ class DarkhuntSpanExporter(SpanExporter):
             route = self._extract_route(span)
             if route is None:
                 continue
-            key = f"{route.tenant_id}|{route.workspace_id}|{route.application_id}|{route.assessment_run_id}"
+            key = (
+                f"{route.tenant_id}|{route.workspace_id}|"
+                f"{route.application_id}|{route.assessment_run_id}"
+            )
             entry = groups.get(key)
             if entry is None:
                 groups[key] = (route, [span])

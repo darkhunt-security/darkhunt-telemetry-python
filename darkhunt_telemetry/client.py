@@ -12,11 +12,12 @@ import atexit
 import os
 import warnings
 from dataclasses import dataclass, field
-from typing import Any, List, Optional, Sequence, Set
+from typing import Any, Optional, Sequence, Set
 
 from opentelemetry.sdk.resources import SERVICE_NAME, SERVICE_VERSION, Resource
 from opentelemetry.sdk.trace import TracerProvider
 from opentelemetry.sdk.trace.export import BatchSpanProcessor
+from opentelemetry.trace import Tracer
 
 from ._version import __version__ as LIB_VERSION
 from .exporter import DarkhuntSpanExporter
@@ -162,7 +163,7 @@ class DarkhuntTelemetry:
         )
 
         self._provider: Optional[TracerProvider] = None
-        self._tracer = None
+        self._tracer: Optional[Tracer] = None
 
         if self._enabled:
             register_ctx = (
@@ -178,7 +179,9 @@ class DarkhuntTelemetry:
                 api_key=api_key,
                 internal=internal_resolved,
                 service_name=resolved_service_name,
-                flush_at=flush_at if flush_at is not None else _to_int(_env("DARKHUNT_FLUSH_AT"), 20),
+                flush_at=(
+                    flush_at if flush_at is not None else _to_int(_env("DARKHUNT_FLUSH_AT"), 20)
+                ),
                 flush_interval_ms=(
                     flush_interval_ms
                     if flush_interval_ms is not None

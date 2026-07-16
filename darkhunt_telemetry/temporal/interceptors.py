@@ -83,7 +83,9 @@ class _HandoffActivityInbound(ActivityInboundInterceptor):
 
 
 class _HandoffWorkflowOutbound(WorkflowOutboundInterceptor):
-    def __init__(self, next: WorkflowOutboundInterceptor, inbound: "_HandoffWorkflowInbound") -> None:
+    def __init__(
+        self, next: WorkflowOutboundInterceptor, inbound: "_HandoffWorkflowInbound"
+    ) -> None:
         super().__init__(next)
         self._inbound = inbound
 
@@ -103,7 +105,7 @@ class _HandoffWorkflowOutbound(WorkflowOutboundInterceptor):
         args = list(input.args or [])
         first = next(iter(args), None)
         override = first.get(HANDOFF_META) if isinstance(first, dict) else None
-        if override:
+        if override and isinstance(first, dict):
             # Per-edge override: relocate to the header and strip it from args.
             clean = {k: v for k, v in first.items() if k != HANDOFF_META}
             input.args = [clean, *args[1:]]

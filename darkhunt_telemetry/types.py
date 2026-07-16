@@ -6,12 +6,8 @@ runtime, so callers never have to construct ``TypedDict`` instances explicitly.
 
 from __future__ import annotations
 
-from typing import Any, Dict, Optional
-
-try:  # Literal is in typing on 3.8+; fall back defensively.
-    from typing import Literal, TypedDict
-except ImportError:  # pragma: no cover
-    from typing_extensions import Literal, TypedDict  # type: ignore
+# Literal and TypedDict are in typing since 3.8; the package floor is 3.9.
+from typing import Any, Dict, Literal, Optional, TypedDict
 
 ObservationType = Literal[
     "span",

@@ -1,13 +1,27 @@
-"""Minimal pure-Python Keccak-256 (the pre-NIST padding used by Ethereum).
+"""Keccak-256 (the pre-NIST padding used by Ethereum).
 
-Vendored so the EIP-55 validator has no third-party crypto dependency.
+A vetted implementation from ``pycryptodome`` is preferred when that package is
+installed (via the optional ``crypto`` extra); otherwise a vendored pure-Python
+implementation is used as a fallback so the EIP-55 validator has no hard
+third-party crypto dependency.
+
 ``hashlib.sha3_256`` is *not* usable here — it implements the final NIST
 SHA3-256 padding (``0x06``), whereas Ethereum uses original Keccak padding
-(``0x01``). This is a straightforward, well-known implementation of the Keccak
-sponge with rate 1088 / capacity 512.
+(``0x01``). The pure-Python fallback below is a straightforward, well-known
+implementation of the Keccak sponge with rate 1088 / capacity 512.
 """
 
 from __future__ import annotations
+
+try:  # Prefer a vetted implementation when pycryptodome is available.
+    from Crypto.Hash import keccak as _pyc_keccak  # pycryptodome
+
+    def _vetted(data: bytes) -> bytes:
+        return _pyc_keccak.new(digest_bits=256, data=data).digest()
+
+    _HAVE_VETTED = True
+except Exception:  # pragma: no cover - depends on optional dependency
+    _HAVE_VETTED = False
 
 _ROUND_CONSTANTS = [
     0x0000000000000001, 0x0000000000008082, 0x800000000000808A,
@@ -58,6 +72,17 @@ def _keccak_f(state):
 
 
 def keccak_256(data: bytes) -> bytes:
+    """Return the Keccak-256 digest of ``data``.
+
+    Uses the vetted ``pycryptodome`` backend when available, otherwise the
+    vendored pure-Python fallback.
+    """
+    if _HAVE_VETTED:
+        return _vetted(data)
+    return _keccak_256_pure(data)
+
+
+def _keccak_256_pure(data: bytes) -> bytes:
     rate_bytes = 136  # 1088-bit rate for Keccak-256
     # Pad: original Keccak padding (0x01 ... 0x80).
     padded = bytearray(data)

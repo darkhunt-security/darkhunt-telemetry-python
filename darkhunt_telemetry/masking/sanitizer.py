@@ -12,9 +12,12 @@ import os
 import re
 import warnings
 from dataclasses import dataclass
-from typing import Any, List, Optional, Pattern, Sequence
+from typing import Any, Callable, List, Optional, Pattern, Sequence
 
 from .validators import VALIDATORS, Validator
+
+# A compiled replacement callable: (match) -> replacement string.
+_Repl = Callable[["re.Match[str]"], str]
 
 
 @dataclass
@@ -38,6 +41,7 @@ class CustomPattern:
 class _CompiledRule:
     marker: str
     pattern: Pattern[str]
+    repl: _Repl
     validator: Optional[Validator] = None
 
 
@@ -97,13 +101,36 @@ def _load_defaults() -> dict:
     return json.loads(text)
 
 
+def _build_repl(marker: str, validator: Optional[Validator]) -> _Repl:
+    """Precompute a rule's re.sub replacement callable once, at compile time.
+
+    A function (not a string) so backslashes / group refs in ``marker`` are never
+    interpreted by ``re.sub``; validated rules redact only when the validator
+    confirms the match.
+    """
+    if validator is None:
+        def repl(m: "re.Match[str]") -> str:
+            return marker
+    else:
+        def repl(m: "re.Match[str]") -> str:
+            return marker if validator(m.group(0)) else m.group(0)
+    return repl
+
+
 def _compile_rules(
     rules: Sequence[dict], custom_patterns: Sequence[CustomPattern]
 ) -> List[_CompiledRule]:
     compiled: List[_CompiledRule] = []
 
     for rule in rules:
-        flags = re.IGNORECASE if rule.get("caseSensitive") is False else 0
+        # The bundled rules are ported verbatim from the TS/ECMAScript SDK,
+        # where \d \w \s are ASCII-only. Python's re treats them as UNICODE by
+        # default on str patterns, which would make the SAME ruleset match
+        # differently here than in the reference SDK. Compile with re.ASCII so
+        # \d \w \s keep ECMA semantics — exact parity with the reference SDK.
+        flags: int = re.ASCII
+        if rule.get("caseSensitive") is False:
+            flags |= re.IGNORECASE
         validator: Optional[Validator] = None
         validation = rule.get("validation")
         if validation:
@@ -118,19 +145,25 @@ def _compile_rules(
                     stacklevel=2,
                 )
                 continue
+        marker = rule["marker"]
         compiled.append(
             _CompiledRule(
-                marker=rule["marker"],
+                marker=marker,
                 pattern=re.compile(rule["pattern"], flags),
+                repl=_build_repl(marker, validator),
                 validator=validator,
             )
         )
 
     for cp in custom_patterns:
         _assert_not_pathological(cp.regex, cp.name)
-        flags = 0 if cp.case_sensitive else re.IGNORECASE
+        cp_flags = 0 if cp.case_sensitive else re.IGNORECASE
         compiled.append(
-            _CompiledRule(marker=cp.marker, pattern=re.compile(cp.regex, flags))
+            _CompiledRule(
+                marker=cp.marker,
+                pattern=re.compile(cp.regex, cp_flags),
+                repl=_build_repl(cp.marker, None),
+            )
         )
 
     return compiled
@@ -161,18 +194,7 @@ class Sanitizer:
         # Strip zero-width chars first so a spliced ZWS can't bypass the rules.
         result = _ZERO_WIDTH_CHARS.sub("", input)
         for rule in self._rules:
-            if rule.validator is not None:
-                validator = rule.validator
-                marker = rule.marker
-                result = rule.pattern.sub(
-                    lambda m, _v=validator, _mk=marker: _mk if _v(m.group(0)) else m.group(0),
-                    result,
-                )
-            else:
-                marker = rule.marker
-                # Use a function replacement so backslashes / group refs in the
-                # marker are never interpreted by re.sub.
-                result = rule.pattern.sub(lambda _m, _mk=marker: _mk, result)
+            result = rule.pattern.sub(rule.repl, result)
         return result
 
     def sanitize_unknown(self, value: Any) -> Any:

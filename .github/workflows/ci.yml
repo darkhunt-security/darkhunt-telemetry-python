@@ -11,6 +11,24 @@ permissions:
   contents: read
 
 jobs:
+  lint:
+    # Static analysis: ruff (lint + import order) and mypy (type-check the
+    # package we ship types for). Runs once — no version matrix needed.
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install (with dev + temporal extras)
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e ".[dev,temporal]"
+      - name: ruff (lint)
+        run: ruff check darkhunt_telemetry tests
+      - name: mypy (type-check)
+        run: mypy
+
   test:
     runs-on: ubuntu-latest
     strategy:

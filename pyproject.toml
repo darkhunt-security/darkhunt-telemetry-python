@@ -44,10 +44,16 @@ dependencies = [
 # Optional Temporal handoff propagation (interceptors). Install with
 #   pip install "darkhunt-telemetry[temporal]"
 temporal = ["temporalio>=1.4.0"]
+# Vetted-crypto path for the Keccak validator (lazy-imported).
+#   pip install "darkhunt-telemetry[crypto]"
+crypto = ["pycryptodome>=3.19"]
 # Development / test tooling.
 dev = [
     "pytest>=7.0",
     "pyyaml>=6.0",
+    "ruff>=0.6",
+    "mypy>=1.8",
+    "types-requests>=2.25",
 ]
 
 [project.urls]
@@ -60,6 +66,38 @@ packages = ["darkhunt_telemetry"]
 
 [tool.hatch.build.targets.wheel.force-include]
 "darkhunt_telemetry/masking/rules/rules.json" = "darkhunt_telemetry/masking/rules/rules.json"
+"darkhunt_telemetry/py.typed" = "darkhunt_telemetry/py.typed"
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py39"
+
+[tool.ruff.lint]
+# E/W pycodestyle, F pyflakes, I import-sorting, B bugbear. (pyupgrade/UP is
+# intentionally omitted: with a 3.9 floor + `from __future__ import annotations`
+# it would only churn typing style.)
+select = ["E", "W", "F", "I", "B"]
+
+[tool.ruff.lint.per-file-ignores]
+# Tests may shadow builtins / use assert-heavy patterns and local imports.
+"tests/**" = ["B011"]
+
+[tool.mypy]
+# Analyze at 3.10 (the floor the current mypy supports); runtime 3.9 support is
+# guaranteed by the pytest matrix in CI, and all annotations are stringized via
+# `from __future__ import annotations`.
+python_version = "3.10"
+files = ["darkhunt_telemetry"]
+# Third-party OTel/requests/temporalio ship partial or no stubs; don't fail on
+# their internals. Our own package stays checked.
+ignore_missing_imports = true
+warn_unused_ignores = true
+no_implicit_optional = true
+warn_redundant_casts = true
+# Temporal interceptors subclass dynamically-typed temporalio base classes.
+[[tool.mypy.overrides]]
+module = "darkhunt_telemetry.temporal.*"
+disallow_untyped_defs = false

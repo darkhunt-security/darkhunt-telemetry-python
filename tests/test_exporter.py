@@ -5,10 +5,8 @@ from __future__ import annotations
 from unittest import mock
 
 from opentelemetry.sdk.trace import TracerProvider
-from opentelemetry.sdk.trace.export import SimpleSpanProcessor
-from opentelemetry.sdk.trace.export import SpanExportResult
+from opentelemetry.sdk.trace.export import SimpleSpanProcessor, SpanExportResult
 
-from darkhunt_telemetry.attributes import ATTR
 from darkhunt_telemetry.exporter import DarkhuntSpanExporter
 from darkhunt_telemetry.trace import Trace
 
