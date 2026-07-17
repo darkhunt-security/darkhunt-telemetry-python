@@ -74,3 +74,43 @@ jobs:
         run: uv build
       - name: Check metadata
         run: uvx twine check dist/*
+
+  dev-build:
+    # Continuous build channel: on every push to main, stamp a PEP 440 dev
+    # version (<base>.dev<run_number>, e.g. 0.5.5.dev42) into _version.py and
+    # build sdist + wheel, uploaded as a workflow artifact. Nothing is published
+    # to a registry — stable releases still go through release.yml
+    # (`gh release create vX.Y.Z`) using the exact version in _version.py.
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    needs: [lint, test, build]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v6
+        with:
+          version: "0.11.29"
+          enable-cache: true
+      - name: Compute dev version
+        id: version
+        # Read the base version straight from the file (no env sync needed),
+        # strip any existing .dev suffix, then append this run's number.
+        run: |
+          BASE=$(sed -n 's/^__version__ = "\(.*\)"/\1/p' darkhunt_telemetry/_version.py)
+          BASE="${BASE%%.dev*}"
+          echo "version=${BASE}.dev${{ github.run_number }}" >> "$GITHUB_OUTPUT"
+      - name: Stamp dev version into _version.py
+        run: |
+          sed -i "s/^__version__ = .*/__version__ = \"${{ steps.version.outputs.version }}\"/" darkhunt_telemetry/_version.py
+      - name: Build sdist + wheel
+        run: uv build
+      - name: Check metadata
+        run: uvx twine check dist/*
+      - name: Upload dev build
+        uses: actions/upload-artifact@v4
+        with:
+          name: dev-build-${{ steps.version.outputs.version }}
+          path: dist/
+          retention-days: 14
+      - name: Record build version
+        run: |
+          echo "Dev build version: \`${{ steps.version.outputs.version }}\`" >> "$GITHUB_STEP_SUMMARY"
