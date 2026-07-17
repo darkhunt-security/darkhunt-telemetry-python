@@ -75,42 +75,55 @@ jobs:
       - name: Check metadata
         run: uvx twine check dist/*
 
-  dev-build:
-    # Continuous build channel: on every push to main, stamp a PEP 440 dev
-    # version (<base>.dev<run_number>, e.g. 0.5.5.dev42) into _version.py and
-    # build sdist + wheel, uploaded as a workflow artifact. Nothing is published
-    # to a registry — stable releases still go through release.yml
-    # (`gh release create vX.Y.Z`) using the exact version in _version.py.
+  publish:
+    # main = release: every push to main publishes a unique version straight to
+    # PyPI. The version is MAJOR.MINOR (from darkhunt_telemetry/_version.py, which
+    # you control) + this run's number as the patch — e.g. 0.5.42. PyPI versions
+    # are immutable, so the run number guarantees each merge gets a fresh,
+    # monotonically increasing version. Bump MAJOR.MINOR in _version.py to start
+    # a new series; CI owns the patch segment.
+    #
+    # Publishing uses PyPI Trusted Publishing (OIDC) — NO API token is stored.
+    # One-time setup: register a (pending) Trusted Publisher on PyPI for project
+    # `darkhunt-telemetry` pointing at owner=darkhunt-security,
+    # repo=darkhunt-telemetry-python, workflow=ci.yml, environment=pypi, and
+    # create the `pypi` GitHub Environment.
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
     needs: [lint, test, build]
     runs-on: ubuntu-latest
+    # Serialize publishes so two quick merges can't race on the build/upload.
+    concurrency:
+      group: publish-pypi
+      cancel-in-progress: false
+    environment:
+      name: pypi
+      url: https://pypi.org/p/darkhunt-telemetry
+    permissions:
+      contents: read # for checkout
+      id-token: write # REQUIRED for PyPI Trusted Publishing (OIDC)
     steps:
       - uses: actions/checkout@v4
       - uses: astral-sh/setup-uv@v6
         with:
           version: "0.11.29"
           enable-cache: true
-      - name: Compute dev version
+      - name: Compute release version
         id: version
-        # Read the base version straight from the file (no env sync needed),
-        # strip any existing .dev suffix, then append this run's number.
+        # MAJOR.MINOR is human-controlled in _version.py; the patch is this run's
+        # number, so every merge to main is a unique, increasing version.
         run: |
-          BASE=$(sed -n 's/^__version__ = "\(.*\)"/\1/p' darkhunt_telemetry/_version.py)
-          BASE="${BASE%%.dev*}"
-          echo "version=${BASE}.dev${{ github.run_number }}" >> "$GITHUB_OUTPUT"
-      - name: Stamp dev version into _version.py
+          FULL=$(sed -n 's/^__version__ = "\(.*\)"/\1/p' darkhunt_telemetry/_version.py)
+          MAJOR_MINOR=$(echo "$FULL" | cut -d. -f1,2)
+          echo "version=${MAJOR_MINOR}.${{ github.run_number }}" >> "$GITHUB_OUTPUT"
+      - name: Stamp version into _version.py
         run: |
           sed -i "s/^__version__ = .*/__version__ = \"${{ steps.version.outputs.version }}\"/" darkhunt_telemetry/_version.py
       - name: Build sdist + wheel
         run: uv build
       - name: Check metadata
         run: uvx twine check dist/*
-      - name: Upload dev build
-        uses: actions/upload-artifact@v4
-        with:
-          name: dev-build-${{ steps.version.outputs.version }}
-          path: dist/
-          retention-days: 14
-      - name: Record build version
+      - name: Publish to PyPI (Trusted Publishing)
+        uses: pypa/gh-action-pypi-publish@release/v1
+      - name: Record published version
         run: |
-          echo "Dev build version: \`${{ steps.version.outputs.version }}\`" >> "$GITHUB_STEP_SUMMARY"
+          echo "Published \`${{ steps.version.outputs.version }}\` to PyPI" >> "$GITHUB_STEP_SUMMARY"
