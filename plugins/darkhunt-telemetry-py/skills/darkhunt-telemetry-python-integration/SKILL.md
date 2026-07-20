@@ -1,8 +1,8 @@
 ---
-name: darkhunt-telemetry-integration
+name: darkhunt-telemetry-python-integration
 description: |
   Use this skill when integrating `darkhunt-telemetry` (the Darkhunt trace-hub
-  PYTHON SDK at /Users/sergey/proj/darkhunt/darkhunt-telemetry-python) into a
+  PYTHON SDK, published on PyPI) into a
   Python service. Covers: install (published on PyPI), singleton client setup,
   trace + generation + span emission via the `with`-based active-context helpers,
   backdated `start_time`, graceful shutdown, routing-field discipline (tenant_id /
@@ -25,14 +25,16 @@ Python service. It is the Python analog of the TypeScript
 semantics, same masking ruleset, adapted to Python idioms (keyword arguments,
 `with` context managers, `contextvars`).
 
-**The reference integration is `temporal-demo-python`** at
-`/Users/sergey/proj/darkhunt/temporal-demo-python` — a six-domain multi-agent demo
-where each domain uses a *different* orchestration style, so it demonstrates every
-handoff transport at once. Read it when in doubt; the patterns below are extracted
-from it. The SDK source lives at
-`/Users/sergey/proj/darkhunt/darkhunt-telemetry-python` and ships a `README.md`
-with the full API reference + masking docs — **read that README** for anything the
-patterns below don't cover.
+The patterns below are extracted from `temporal-demo-python`, an internal
+six-domain multi-agent reference integration where each domain uses a *different*
+orchestration style, so it demonstrates every handoff transport at once. File-level
+pointers into it are listed at the end of this skill; if you don't have that repo
+checked out, the inline snippets here are self-contained.
+
+For anything the patterns below don't cover, read the SDK's own `README.md` — it
+carries the full API reference + masking docs. It ships inside the installed
+package and is published at
+<https://github.com/darkhunt-security/darkhunt-telemetry-python>.
 
 ## What the SDK is
 
@@ -573,6 +575,10 @@ connecting them is an architecture change. For OSS/example repos, persist that n
 in the README too.
 
 ## Reference files in temporal-demo-python
+
+These paths are inside the internal `temporal-demo-python` reference repo. Skip
+this section if you don't have it — every pattern it indexes is already shown
+inline above.
 
 - `src/demo/telemetry.py` — the singleton/memoized clients + `open_agent_trace` /
   `open_gateway_trace` / `trace_chat` / `trace_gen` / `trace_tool` / lifecycle.

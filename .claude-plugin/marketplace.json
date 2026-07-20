@@ -1,0 +1,22 @@
+{
+  "$schema": "https://anthropic.com/claude-code/marketplace.schema.json",
+  "name": "darkhunt-py",
+  "description": "Darkhunt developer tools for Claude Code (Python) — skills for integrating Darkhunt LLM observability and security into your Python services.",
+  "owner": {
+    "name": "Darkhunt Limited",
+    "email": "support@darkhunt.ai"
+  },
+  "plugins": [
+    {
+      "name": "darkhunt-telemetry-py",
+      "description": "Integration playbook for the darkhunt-telemetry Python SDK — wires LLM tracing, generations, and spans (with built-in secret/PII masking) into a Python service. Auto-invokes when you ask Claude to add Darkhunt telemetry / observability to a Python service.",
+      "source": "./plugins/darkhunt-telemetry-py",
+      "category": "observability",
+      "author": {
+        "name": "Darkhunt Limited",
+        "email": "support@darkhunt.ai"
+      },
+      "homepage": "https://github.com/darkhunt-security/darkhunt-telemetry-python"
+    }
+  ]
+}
