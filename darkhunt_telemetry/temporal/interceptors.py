@@ -27,8 +27,10 @@ and re-emits spans.
 from __future__ import annotations
 
 import contextvars
+import warnings
 from typing import Any, List, Optional, Type
 
+import temporalio.activity
 import temporalio.converter
 import temporalio.workflow
 from temporalio.worker import (
@@ -50,6 +52,15 @@ _current_handoff: "contextvars.ContextVar[Optional[List[str]]]" = contextvars.Co
 )
 
 
+class HandoffHeaderWarning(UserWarning):
+    """Emitted when a Temporal handoff header cannot be decoded, so the trace
+    silently detaches from its upstream. Almost always a payload-converter
+    mismatch: the header was encoded with a worker-configured ``DataConverter``
+    (encryption codec, Pydantic, compression) but decoded with a different one.
+    Filter it with ``warnings.filterwarnings("ignore",
+    category=HandoffHeaderWarning)`` once you have confirmed the cause."""
+
+
 def current_handoff() -> Optional[List[str]]:
     """The upstream handoff token(s) this activity should nest under, read from
     the Temporal Header the workflow propagated. Returns ``None`` outside an
@@ -58,21 +69,68 @@ def current_handoff() -> Optional[List[str]]:
     return _current_handoff.get()
 
 
-def _decode_header(headers: Any, payload_converter: Any) -> Optional[List[str]]:
-    payload = headers.get(HANDOFF_HEADER) if headers else None
+def _decode_header(
+    headers: Any, payload_converter: Any, header_key: str = HANDOFF_HEADER
+) -> Optional[List[str]]:
+    """Decode the handoff token list from ``headers[header_key]`` using
+    ``payload_converter``. Returns ``None`` when the header is absent. On a
+    decode failure (or an unexpected shape) it does NOT raise — it emits a
+    :class:`HandoffHeaderWarning` and returns ``None`` so the activity/workflow
+    keeps running, merely detached from its upstream trace."""
+    payload = headers.get(header_key) if headers else None
     if payload is None:
         return None
     try:
         value = payload_converter.from_payload(payload)
-    except Exception:
+    except Exception as exc:
+        warnings.warn(
+            f"darkhunt-telemetry: failed to decode Temporal handoff header "
+            f"{header_key!r} ({type(exc).__name__}: {exc}); the trace will be "
+            f"detached from its upstream. This usually means the header was "
+            f"encoded with a different payload converter than the one decoding "
+            f"it — configure HandoffInterceptor with the worker's DataConverter.",
+            HandoffHeaderWarning,
+            stacklevel=2,
+        )
         return None
-    return list(value) if isinstance(value, list) else None
+    if isinstance(value, list):
+        return list(value)
+    warnings.warn(
+        f"darkhunt-telemetry: Temporal handoff header {header_key!r} decoded to "
+        f"{type(value).__name__}, expected a list; the trace will be detached "
+        f"from its upstream.",
+        HandoffHeaderWarning,
+        stacklevel=2,
+    )
+    return None
 
 
 class _HandoffActivityInbound(ActivityInboundInterceptor):
+    def __init__(
+        self,
+        next: ActivityInboundInterceptor,
+        payload_converter: Any = None,
+        header_key: str = HANDOFF_HEADER,
+    ) -> None:
+        super().__init__(next)
+        self._payload_converter = payload_converter
+        self._header_key = header_key
+
+    def _resolve_converter(self) -> Any:
+        # Prefer the worker's configured converter, reached from the active
+        # activity context (mirrors ``temporalio.workflow.payload_converter()``
+        # on the workflow side). Fall back to an explicit constructor override,
+        # then to the global default only when nothing else is reachable.
+        try:
+            return temporalio.activity.payload_converter()
+        except Exception:  # nosec B110 - not in an activity context; fall back below
+            pass
+        if self._payload_converter is not None:
+            return self._payload_converter
+        return temporalio.converter.default().payload_converter
+
     async def execute_activity(self, input: ExecuteActivityInput) -> Any:
-        payload_converter = temporalio.converter.default().payload_converter
-        handoff = _decode_header(input.headers, payload_converter)
+        handoff = _decode_header(input.headers, self._resolve_converter(), self._header_key)
         if handoff is None:
             return await self.next.execute_activity(input)
         token = _current_handoff.set(handoff)
@@ -92,7 +150,7 @@ class _HandoffWorkflowOutbound(WorkflowOutboundInterceptor):
     def _with_header(self, headers: Any, tokens: List[str]) -> dict:
         payload = temporalio.workflow.payload_converter().to_payload(tokens)
         merged = dict(headers) if headers else {}
-        merged[HANDOFF_HEADER] = payload
+        merged[self._inbound.header_key] = payload
         return merged
 
     def start_activity(self, input: StartActivityInput):
@@ -116,6 +174,11 @@ class _HandoffWorkflowOutbound(WorkflowOutboundInterceptor):
 
 
 class _HandoffWorkflowInbound(WorkflowInboundInterceptor):
+    #: Temporal Header key this workflow-side interceptor reads/propagates.
+    #: Overridden per subclass by :meth:`HandoffInterceptor.workflow_interceptor_class`
+    #: when a custom key is configured.
+    header_key: str = HANDOFF_HEADER
+
     def __init__(self, next: WorkflowInboundInterceptor) -> None:
         super().__init__(next)
         self.incoming: Optional[List[str]] = None
@@ -124,7 +187,9 @@ class _HandoffWorkflowInbound(WorkflowInboundInterceptor):
         self.next.init(_HandoffWorkflowOutbound(outbound, self))
 
     async def execute_workflow(self, input: ExecuteWorkflowInput) -> Any:
-        incoming = _decode_header(input.headers, temporalio.workflow.payload_converter())
+        incoming = _decode_header(
+            input.headers, temporalio.workflow.payload_converter(), self.header_key
+        )
         if incoming:
             self.incoming = incoming
         return await self.next.execute_workflow(input)
@@ -136,15 +201,44 @@ class HandoffInterceptor(Interceptor):
 
         worker = Worker(client, task_queue="...", workflows=[...], activities=[...],
                         interceptors=[HandoffInterceptor()])
+
+    :param payload_converter: Fallback converter used by the activity-inbound
+        side to decode the handoff header. Normally unnecessary — the interceptor
+        reads the worker's configured converter from the active activity context
+        (``temporalio.activity.payload_converter()``), so a worker built with a
+        custom :class:`~temporalio.converter.DataConverter` (encryption codec,
+        Pydantic, compression) decodes correctly with no extra wiring. Provide it
+        only for the rare case where that automatic lookup is unavailable; the
+        global default is used when neither is reachable.
+    :param header_key: Temporal Header key carrying the handoff token array.
+        Defaults to :data:`~darkhunt_telemetry.temporal.HANDOFF_HEADER`; override
+        both worker sides by passing the same value here.
     """
 
+    def __init__(
+        self,
+        *,
+        payload_converter: Any = None,
+        header_key: str = HANDOFF_HEADER,
+    ) -> None:
+        self._payload_converter = payload_converter
+        self._header_key = header_key
+
     def intercept_activity(self, next: ActivityInboundInterceptor) -> ActivityInboundInterceptor:
-        return _HandoffActivityInbound(next)
+        return _HandoffActivityInbound(next, self._payload_converter, self._header_key)
 
     def workflow_interceptor_class(
         self, input: WorkflowInterceptorClassInput
     ) -> Optional[Type[WorkflowInboundInterceptor]]:
-        return _HandoffWorkflowInbound
+        if self._header_key == HANDOFF_HEADER:
+            return _HandoffWorkflowInbound
+        # Bake the custom key onto a subclass so the sandboxed workflow
+        # interceptor (instantiated with only ``next``) still sees it.
+        return type(
+            "_HandoffWorkflowInbound",
+            (_HandoffWorkflowInbound,),
+            {"header_key": self._header_key},
+        )
 
 
-__all__ = ["HandoffInterceptor", "current_handoff"]
+__all__ = ["HandoffInterceptor", "HandoffHeaderWarning", "current_handoff"]

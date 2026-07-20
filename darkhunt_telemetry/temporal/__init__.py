@@ -14,10 +14,11 @@ side::
 from __future__ import annotations
 
 from .handoff_header import HANDOFF_HEADER, HANDOFF_META, child_args
-from .interceptors import HandoffInterceptor, current_handoff
+from .interceptors import HandoffHeaderWarning, HandoffInterceptor, current_handoff
 
 __all__ = [
     "HandoffInterceptor",
+    "HandoffHeaderWarning",
     "current_handoff",
     "child_args",
     "HANDOFF_HEADER",

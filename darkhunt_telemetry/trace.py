@@ -9,7 +9,7 @@ caller and records an ``agent_handoff`` link) and :meth:`handoff_token`.
 
 from __future__ import annotations
 
-from typing import Any, List, Optional, Sequence, Union
+from typing import TYPE_CHECKING, Any, List, Literal, Optional, Sequence, Type, Union
 
 from opentelemetry import context as context_api
 from opentelemetry import trace as trace_api
@@ -19,14 +19,16 @@ from .attributes import ATTR
 from .masking import Sanitizer
 from .span import (
     ActiveChildHost,
+    AttributeWriter,
     HandoffToken,
-    apply_metadata_attrs,
-    safe_json_dumps,
     span_context_to_token,
     to_otel_links,
     token_to_context,
 )
 from .types import Metadata, ObservationType
+
+if TYPE_CHECKING:
+    from types import TracebackType
 
 
 def _to_handoff_contexts(
@@ -105,6 +107,7 @@ class Trace(ActiveChildHost):
             start_time=_to_nanos(start_time),
         )
         self._root_context = trace_api.set_span_in_context(self._root_span, parent_context)
+        self._writer = AttributeWriter(self._root_span, self._sanitizer)
         self._apply_trace_attrs()
 
     # --- ActiveChildHost wiring ---
@@ -231,18 +234,29 @@ class Trace(ActiveChildHost):
 
         self._root_span.end(end_time=_to_nanos(end_time))
 
-    # --- internals ---
-    def _set_io(self, key: str, value: Any) -> None:
-        if value is None:
-            return
-        sanitized = (
-            self._sanitizer.sanitize_unknown(value) if self._sanitizer is not None else value
-        )
-        if isinstance(sanitized, str):
-            self._root_span.set_attribute(key, sanitized)
-        else:
-            self._root_span.set_attribute(key, safe_json_dumps(sanitized))
+    # --- context manager (lifecycle only) ---
+    def __enter__(self) -> "Trace":
+        """Enter a ``with`` block that guarantees the trace's root span is ended
+        on exit.
 
+        NOTE: this only guarantees END; it does NOT make the root span the
+        ACTIVE OTel context. Use the ``start_active_*`` helpers on the trace when
+        you also need child/ambient spans to nest under it.
+        """
+        return self
+
+    def __exit__(
+        self,
+        exc_type: "Optional[Type[BaseException]]",
+        exc: "Optional[BaseException]",
+        tb: "Optional[TracebackType]",
+    ) -> Literal[False]:
+        """End the root span on ``with``-block exit. Never suppresses the
+        exception."""
+        self.end()
+        return False
+
+    # --- internals ---
     def _apply_trace_attrs(self) -> None:
         span = self._root_span
         span.set_attribute(ATTR.OBSERVATION_TYPE, self._observation_type)
@@ -269,9 +283,9 @@ class Trace(ActiveChildHost):
         if self._environment:
             span.set_attribute(ATTR.ENVIRONMENT, self._environment)
         if self._metadata:
-            apply_metadata_attrs(span, self._metadata, self._sanitizer)
-        self._set_io(ATTR.OBSERVATION_INPUT, self._input)
-        self._set_io(ATTR.OBSERVATION_OUTPUT, self._output)
+            self._writer.apply_metadata(self._metadata)
+        self._writer.set_io(ATTR.OBSERVATION_INPUT, self._input)
+        self._writer.set_io(ATTR.OBSERVATION_OUTPUT, self._output)
 
 
 __all__ = ["Trace", "HandoffToken"]
