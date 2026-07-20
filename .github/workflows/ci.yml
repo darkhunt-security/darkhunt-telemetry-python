@@ -127,3 +127,18 @@ jobs:
       - name: Record published version
         run: |
           echo "Published \`${{ steps.version.outputs.version }}\` to PyPI" >> "$GITHUB_STEP_SUMMARY"
+      # Guarded on the secret being present: a missing or rotated webhook must
+      # not red-X a publish that actually succeeded. Requires
+      # SLACK_WEBHOOK_RELEASES to exist for this repo (repo- or org-level) —
+      # without it this step is skipped silently.
+      - name: Notify Slack
+        if: ${{ secrets.SLACK_WEBHOOK_RELEASES != '' }}
+        continue-on-error: true
+        uses: slackapi/slack-github-action@45a88b9581bfab2566dc881e2cd66d334e621e2c # v3.0.3
+        with:
+          webhook: ${{ secrets.SLACK_WEBHOOK_RELEASES }}
+          webhook-type: incoming-webhook
+          payload: |
+            text: "*${{ github.event.repository.name }}* released `${{ steps.version.outputs.version }}` to PyPI\n
+            • Commit: <${{ github.event.head_commit.url }}|${{ github.event.head_commit.message }}>\n
+            • Published by: ${{ github.actor }}"
