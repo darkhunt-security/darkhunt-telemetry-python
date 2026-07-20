@@ -1,0 +1,34 @@
+# Dependabot config for the Python SDK. Mirrors the TS repo's setup: weekly
+# cadence, grouped OpenTelemetry bumps (so the opentelemetry-* packages stay in
+# lockstep), grouped github-actions bumps, and a `dependencies` label on every
+# PR. Security updates flow via GitHub's built-in security-update path (repo
+# Settings -> Security), not this file.
+version: 2
+updates:
+  - package-ecosystem: uv
+    directory: "/"
+    schedule:
+      interval: weekly
+    labels:
+      - dependencies
+    open-pull-requests-limit: 10
+    groups:
+      opentelemetry:
+        patterns:
+          - "opentelemetry-*"
+      dev-dependencies-minor-patch:
+        dependency-type: development
+        update-types:
+          - minor
+          - patch
+
+  - package-ecosystem: github-actions
+    directory: "/"
+    schedule:
+      interval: weekly
+    labels:
+      - dependencies
+    groups:
+      github-actions:
+        patterns:
+          - "*"
