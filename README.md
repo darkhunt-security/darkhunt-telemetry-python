@@ -1,5 +1,12 @@
 # Darkhunt telemetry for Python
 
+[![PyPI version](https://img.shields.io/pypi/v/darkhunt-telemetry.svg)](https://pypi.org/project/darkhunt-telemetry/)
+[![Supported Python versions](https://img.shields.io/pypi/pyversions/darkhunt-telemetry.svg)](https://pypi.org/project/darkhunt-telemetry/)
+[![CI](https://github.com/darkhunt-security/darkhunt-telemetry-python/actions/workflows/ci.yml/badge.svg)](https://github.com/darkhunt-security/darkhunt-telemetry-python/actions/workflows/ci.yml)
+[![Ruff](https://img.shields.io/endpoint?url=https://raw.githubusercontent.com/astral-sh/ruff/main/assets/badge/v2.json)](https://github.com/astral-sh/ruff)
+[![Checked with mypy](https://www.mypy-lang.org/static/mypy_badge.svg)](https://mypy-lang.org/)
+[![License](https://img.shields.io/pypi/l/darkhunt-telemetry.svg)](https://github.com/darkhunt-security/darkhunt-telemetry-python/blob/main/LICENSE)
+
 Python SDK for sending LLM **traces**, **generations**, and **observations** to
 the Darkhunt platform for persistence and security data enrichment. Built on
 OpenTelemetry primitives (TracerProvider, BatchSpanProcessor, OTLP/protobuf),
@@ -154,24 +161,24 @@ created after inherit the values.
 
 Every option resolves `constructor arg > env var > default`.
 
-| Option (`DarkhuntTelemetry(...)`) | Env var                             | Default                              |
-| --------------------------------- | ----------------------------------- | ------------------------------------ |
-| `base_url`                        | `DARKHUNT_BASE_URL`                 | `https://api.darkhunt.ai/trace-hub`  |
-| `api_key`                         | `DARKHUNT_API_KEY`                  | — (required on the public endpoint)  |
-| `service_name`                    | `DARKHUNT_SERVICE_NAME` / `OTEL_SERVICE_NAME` | `darkhunt-telemetry`      |
-| `tenant_id`                       | `DARKHUNT_TENANT_ID`                | — (required)                         |
-| `workspace_id`                    | `DARKHUNT_WORKSPACE_ID`             | — (required)                         |
-| `application_id`                  | `DARKHUNT_APPLICATION_ID`           | — (required)                         |
-| `assessment_run_id`               | `DARKHUNT_ASSESSMENT_RUN_ID`        | — (optional, Darkhunt-internal)      |
-| `release`                         | `DARKHUNT_RELEASE`                  | —                                    |
-| `environment`                     | `DARKHUNT_ENVIRONMENT`              | —                                    |
-| `enabled`                         | `DARKHUNT_ENABLED`                  | `true`                               |
-| `internal`                        | `DARKHUNT_INTERNAL`                 | `false`                              |
-| `flush_at`                        | `DARKHUNT_FLUSH_AT`                 | `20` spans                           |
-| `flush_interval_ms`               | `DARKHUNT_FLUSH_INTERVAL` (seconds) | `5` s                                |
-| `timeout_ms`                      | `DARKHUNT_TIMEOUT` (seconds)        | `10` s                               |
-| `register_context_manager`        | `DARKHUNT_REGISTER_CONTEXT_MANAGER` | `true`                               |
-| `mask`                            | —                                   | `MaskingOptions(enabled=True)`       |
+| Option (`DarkhuntTelemetry(...)`) | Env var                                       | Default                             |
+|-----------------------------------|-----------------------------------------------|-------------------------------------|
+| `base_url`                        | `DARKHUNT_BASE_URL`                           | `https://api.darkhunt.ai/trace-hub` |
+| `api_key`                         | `DARKHUNT_API_KEY`                            | — (required on the public endpoint) |
+| `service_name`                    | `DARKHUNT_SERVICE_NAME` / `OTEL_SERVICE_NAME` | `darkhunt-telemetry`                |
+| `tenant_id`                       | `DARKHUNT_TENANT_ID`                          | — (required)                        |
+| `workspace_id`                    | `DARKHUNT_WORKSPACE_ID`                       | — (required)                        |
+| `application_id`                  | `DARKHUNT_APPLICATION_ID`                     | — (required)                        |
+| `assessment_run_id`               | `DARKHUNT_ASSESSMENT_RUN_ID`                  | — (optional, Darkhunt-internal)     |
+| `release`                         | `DARKHUNT_RELEASE`                            | —                                   |
+| `environment`                     | `DARKHUNT_ENVIRONMENT`                        | —                                   |
+| `enabled`                         | `DARKHUNT_ENABLED`                            | `true`                              |
+| `internal`                        | `DARKHUNT_INTERNAL`                           | `false`                             |
+| `flush_at`                        | `DARKHUNT_FLUSH_AT`                           | `20` spans                          |
+| `flush_interval_ms`               | `DARKHUNT_FLUSH_INTERVAL` (seconds)           | `5` s                               |
+| `timeout_ms`                      | `DARKHUNT_TIMEOUT` (seconds)                  | `10` s                              |
+| `register_context_manager`        | `DARKHUNT_REGISTER_CONTEXT_MANAGER`           | `true`                              |
+| `mask`                            | —                                             | `MaskingOptions(enabled=True)`      |
 
 > **Two rules when overriding `base_url`:** use the **ingest API host**
 > (`api…darkhunt.ai`), not the dashboard, and **keep the `/trace-hub` path** —
