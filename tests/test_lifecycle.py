@@ -40,15 +40,15 @@ def test_span_context_manager_returns_self(mem):
     t = _trace(mem)
     with t.span("x") as s:
         assert isinstance(s, type(t.span("y")))  # a Span
-        pass
     t.end()
 
 
 def test_span_context_manager_marks_error_and_reraises(mem):
     t = _trace(mem)
 
+    s = t.span("will-fail")
     with pytest.raises(RuntimeError, match="boom"):
-        with t.span("will-fail") as s:
+        with s:
             raise RuntimeError("boom")
     assert s.otel_span.is_recording() is False
     (span,) = mem.by_name("will-fail")
@@ -90,8 +90,9 @@ def test_trace_context_manager_ends_root_span(mem):
 
 
 def test_trace_context_manager_does_not_suppress_exception(mem):
+    trace = _trace(mem, name="chat")
     with pytest.raises(ValueError):
-        with _trace(mem, name="chat") as t:  # noqa: F841
+        with trace:
             raise ValueError("nope")
     (span,) = mem.by_name("chat")
     assert span.end_time is not None
@@ -129,7 +130,7 @@ def test_metadata_and_masking_regression(mem):
         "work",
         metadata={"score": 0.9, "passed": True, "label": "x"},
         input="my email is a@b.com",
-    ) as s:  # noqa: F841
+    ):
         pass
     t.end()
     (span,) = mem.by_name("work")

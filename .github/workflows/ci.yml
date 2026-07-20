@@ -29,13 +29,13 @@ jobs:
       - name: Install (locked, all extras)
         run: uv sync --locked --all-extras --python 3.12
       - name: ruff (lint)
-        run: uv run ruff check darkhunt_telemetry tests
+        run: uv run --no-sync ruff check darkhunt_telemetry tests
       - name: ruff (format check)
-        run: uv run ruff format --check darkhunt_telemetry tests
+        run: uv run --no-sync ruff format --check darkhunt_telemetry tests
       - name: mypy (type-check)
-        run: uv run mypy
+        run: uv run --no-sync mypy
       - name: bandit (security)
-        run: uv run bandit -c pyproject.toml -r darkhunt_telemetry
+        run: uv run --no-sync bandit -c pyproject.toml -r darkhunt_telemetry
 
   test:
     runs-on: ubuntu-latest
@@ -55,7 +55,7 @@ jobs:
       - name: Install (locked, all extras) on Python ${{ matrix.python-version }}
         run: uv sync --locked --all-extras --python ${{ matrix.python-version }}
       - name: Run tests
-        run: uv run pytest -q
+        run: uv run --no-sync pytest -q
 
   build:
     # Prove the package builds (sdist + wheel via hatchling) and passes metadata
@@ -73,7 +73,7 @@ jobs:
       - name: Build sdist + wheel
         run: uv build
       - name: Check metadata
-        run: uvx twine check dist/*
+        run: uvx --no-build twine@6.2.0 check dist/*
 
   publish:
     # main = release: every push to main publishes a unique version straight to
@@ -121,7 +121,7 @@ jobs:
       - name: Build sdist + wheel
         run: uv build
       - name: Check metadata
-        run: uvx twine check dist/*
+        run: uvx --no-build twine@6.2.0 check dist/*
       - name: Publish to PyPI (Trusted Publishing)
         uses: pypa/gh-action-pypi-publish@ba38be9e461d3875417946c167d0b5f3d385a247 # v1.14.1
       - name: Record published version

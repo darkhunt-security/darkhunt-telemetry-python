@@ -66,13 +66,15 @@ def test_sanitize_empty_string_is_noop():
 
 
 def test_redos_guard_rejects_overlapping_alternation():
+    patterns = [CustomPattern(regex=r"(a|a)+", marker="[X]", name="bad")]
     with pytest.raises(ValueError, match="overlapping alternation"):
-        Sanitizer(custom_patterns=[CustomPattern(regex=r"(a|a)+", marker="[X]", name="bad")])
+        Sanitizer(custom_patterns=patterns)
 
 
 def test_redos_guard_rejects_nested_quantifier():
+    patterns = [CustomPattern(regex=r"(\d+)+", marker="[X]")]
     with pytest.raises(ValueError, match="nested-quantifier|catastrophic"):
-        Sanitizer(custom_patterns=[CustomPattern(regex=r"(\d+)+", marker="[X]")])
+        Sanitizer(custom_patterns=patterns)
 
 
 # --- safe_json_dumps ---------------------------------------------------------
