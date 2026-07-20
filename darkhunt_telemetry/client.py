@@ -12,7 +12,7 @@ import atexit
 import os
 import warnings
 from dataclasses import dataclass, field
-from typing import Any, Optional, Sequence, Set
+from typing import Any, Callable, Optional, Sequence, Set
 
 from opentelemetry.sdk.resources import SERVICE_NAME, SERVICE_VERSION, Resource
 from opentelemetry.sdk.trace import TracerProvider
@@ -20,7 +20,7 @@ from opentelemetry.sdk.trace.export import BatchSpanProcessor
 from opentelemetry.trace import Tracer
 
 from ._version import __version__ as LIB_VERSION
-from .exporter import DarkhuntSpanExporter
+from .exporter import DarkhuntSpanExporter, ExporterStats, TelemetryEvent
 from .masking import CustomPattern, Sanitizer
 from .otel_globals import register_otel_context_globals
 from .trace import Trace
@@ -112,6 +112,7 @@ class DarkhuntTelemetry:
         workspace_id: Optional[str] = None,
         application_id: Optional[str] = None,
         assessment_run_id: Optional[str] = None,
+        on_error: Optional[Callable[[TelemetryEvent], None]] = None,
     ) -> None:
         # Ingest host, not the dashboard host (which redirects POSTs -> 405).
         base_url = base_url or _env("DARKHUNT_BASE_URL") or "https://api.darkhunt.ai/trace-hub"
@@ -159,8 +160,10 @@ class DarkhuntTelemetry:
             service_name or _env("DARKHUNT_SERVICE_NAME") or _env("OTEL_SERVICE_NAME") or LIB_NAME
         )
 
+        self._on_error = on_error
         self._provider: Optional[TracerProvider] = None
         self._tracer: Optional[Tracer] = None
+        self._exporter: Optional[DarkhuntSpanExporter] = None
 
         if self._enabled:
             register_ctx = (
@@ -196,6 +199,14 @@ class DarkhuntTelemetry:
     @property
     def enabled(self) -> bool:
         return self._enabled
+
+    def stats(self) -> Optional[ExporterStats]:
+        """Delivery counters (spans exported / dropped-unroutable / export
+        failures), or ``None`` when telemetry is disabled and no exporter
+        exists."""
+        if self._exporter is None:
+            return None
+        return self._exporter.stats()
 
     def trace(
         self,
@@ -267,17 +278,24 @@ class DarkhuntTelemetry:
             sanitizer=self._sanitizer,
         )
 
-    def flush(self) -> None:
-        """Force-flush pending spans. Safe to call any time; swallows export
-        failures (surfaced via warnings)."""
-        if self._provider is not None:
-            try:
-                self._provider.force_flush()
-            except Exception as err:  # pragma: no cover - defensive
-                warnings.warn(
-                    f"darkhunt-telemetry: force_flush() failed; spans may be lost: {err}",
-                    stacklevel=2,
-                )
+    def flush(self) -> bool:
+        """Force-flush pending spans. Safe to call any time.
+
+        Returns True if the flush completed (or there was nothing to flush) and
+        False if it failed or timed out. Delivery-level failures are surfaced via
+        the ``on_error`` hook and :meth:`stats`; a False return here reflects the
+        provider-level force-flush result. Backward compatible: callers ignoring
+        the return value are unaffected."""
+        if self._provider is None:
+            return True
+        try:
+            return bool(self._provider.force_flush())
+        except Exception as err:  # pragma: no cover - defensive
+            warnings.warn(
+                f"darkhunt-telemetry: force_flush() failed; spans may be lost: {err}",
+                stacklevel=2,
+            )
+            return False
 
     def shutdown(self) -> None:
         """Flush and tear down the provider. Idempotent."""
@@ -309,7 +327,9 @@ class DarkhuntTelemetry:
             api_key=api_key,
             timeout_ms=timeout_ms,
             internal=internal,
+            on_error=self._on_error,
         )
+        self._exporter = exporter
         # Manage teardown ourselves via the shared atexit handler (mirrors the TS
         # single shared beforeExit handler), so disable the provider's own.
         self._provider = TracerProvider(resource=resource, shutdown_on_exit=False)
@@ -332,4 +352,4 @@ def _require_field(value: Optional[str], option_name: str, env_var: str) -> None
         )
 
 
-__all__ = ["DarkhuntTelemetry", "MaskingOptions"]
+__all__ = ["DarkhuntTelemetry", "MaskingOptions", "TelemetryEvent", "ExporterStats"]

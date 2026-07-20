@@ -3,7 +3,7 @@ name: darkhunt-telemetry-integration
 description: |
   Use this skill when integrating `darkhunt-telemetry` (the Darkhunt trace-hub
   PYTHON SDK at /Users/sergey/proj/darkhunt/darkhunt-telemetry-python) into a
-  Python service. Covers: install (it is NOT on PyPI), singleton client setup,
+  Python service. Covers: install (published on PyPI), singleton client setup,
   trace + generation + span emission via the `with`-based active-context helpers,
   backdated `start_time`, graceful shutdown, routing-field discipline (tenant_id /
   workspace_id / application_id), creating an OBSERVABILITY application via the
@@ -54,52 +54,45 @@ Key shapes:
 
 ## Step-by-step integration
 
-### 1. Install — the SDK is NOT on PyPI
+### 1. Install — from PyPI
 
-`pip install darkhunt-telemetry` from public PyPI **fails** (404). Depend on it one
-of these ways:
+The SDK is published on public PyPI as **`darkhunt-telemetry`**. Install it directly:
 
-- **Local path** (simplest for a repo that sits beside the SDK checkout). With uv:
+```bash
+pip install "darkhunt-telemetry[temporal]"
+# or, with uv:
+uv add "darkhunt-telemetry[temporal]"
+```
 
-  ```toml
-  # pyproject.toml
-  dependencies = ["darkhunt-telemetry[temporal]>=0.5.5"]
+or declare it as a project dependency:
 
-  [tool.uv.sources]
-  darkhunt-telemetry = { path = "../darkhunt-telemetry-python", editable = true }
-  ```
+```toml
+# pyproject.toml
+dependencies = ["darkhunt-telemetry[temporal]"]
+```
 
-  then `uv sync`. Plain pip: `pip install -e "../darkhunt-telemetry-python[temporal]"`.
-- **Git dependency** (works from any clone, incl. CI/Docker without a local
-  checkout): `darkhunt-telemetry @ git+https://github.com/darkhunt-security/darkhunt-telemetry-python@<ref>`.
-- **Private index**, if your org publishes one.
+then `uv sync`. Releases are **continuous** — every merge to the SDK's `main`
+publishes `0.5.<build>` to PyPI, so the newest release is always the latest.
+Leave the spec unpinned to track latest, or set a floor (`>=0.5.13`) / pin an
+exact version for reproducibility.
 
 **Extras:** `[temporal]` pulls in `temporalio` (only needed for the Temporal
 handoff interceptors); `[crypto]` adds the vetted Keccak validator. The core
 package imports neither, so it loads with zero Temporal/crypto packages installed.
 
-**Docker + a local PATH dependency (the trap).** A `Dockerfile` with `context: .`
-can't `COPY` a sibling path dep that lives outside the build context, and widening
-the context to the parent dir sends the whole monorepo. Use a **named additional
-build context** instead (Buildx / Compose):
+Because it installs from PyPI, **Docker builds just work** — `pip install` /
+`uv sync` pulls the wheel inside the image, with no build-context tricks.
 
-```yaml
-# docker-compose.yml
-build:
-  context: .
-  additional_contexts:
-    dhsdk: ../darkhunt-telemetry-python
-```
-```dockerfile
-# Place the SDK as a SIBLING of the project dir so the ../ path resolves.
-WORKDIR /app/darkhunt-telemetry-python
-COPY --from=dhsdk pyproject.toml README.md LICENSE NOTICE ./
-COPY --from=dhsdk darkhunt_telemetry ./darkhunt_telemetry
-WORKDIR /app/temporal-demo-python
-COPY pyproject.toml uv.lock ./
-COPY src ./src
-RUN uv sync --frozen --no-dev
-```
+**Alternatives (rarely needed):**
+
+- **Local path** — only when hacking on the SDK itself beside your app.
+  With uv: `[tool.uv.sources] darkhunt-telemetry = { path = "../darkhunt-telemetry-python", editable = true }`;
+  plain pip: `pip install -e "../darkhunt-telemetry-python[temporal]"`. (This is
+  the one case that reintroduces the Docker sibling-path trap — a `context: .`
+  build can't `COPY` a dep outside the build context; use a named
+  `additional_contexts: { dhsdk: ../darkhunt-telemetry-python }` and `COPY --from=dhsdk`.)
+- **Git dependency** — to pin an unreleased commit:
+  `darkhunt-telemetry @ git+https://github.com/darkhunt-security/darkhunt-telemetry-python@<ref>`.
 
 ### 2. Get an API key
 
@@ -599,8 +592,9 @@ in the README too.
 
 1. **Constructing the client per call** → leaks. Memoize per `(application_id,
    service_name)`.
-2. **`pip install darkhunt-telemetry` from public PyPI** → 404. Use a path/git/private
-   dep (§1).
+2. **Pinning to an unpublished local checkout when PyPI is fine** → drift from the
+   released SDK. Prefer `pip install "darkhunt-telemetry[temporal]"` from PyPI (§1);
+   reserve the local-path/git deps for hacking on the SDK or pinning an unreleased ref.
 3. **No signal-driven shutdown** → SIGTERM loses the in-memory batch. Wire
    `shutdown()` in a `finally`.
 4. **Missing `start_time` on the MANUAL form** → ~0ms duration. Prefer the

@@ -8,10 +8,11 @@ scoped ingest endpoint with bounded retry + jittered backoff.
 from __future__ import annotations
 
 import secrets
+import threading
 import time
 import warnings
-from dataclasses import dataclass
-from typing import Dict, List, Optional, Sequence
+from dataclasses import dataclass, field
+from typing import Callable, Dict, List, Literal, Optional, Sequence, Tuple
 
 import requests
 from opentelemetry.exporter.otlp.proto.common.trace_encoder import encode_spans
@@ -25,6 +26,11 @@ _INITIAL_BACKOFF_MS = 1000
 _MAX_BACKOFF_MS = 30_000
 _BACKOFF_MULTIPLIER = 2
 _RETRYABLE_STATUS = frozenset({429, 502, 503, 504})
+# Number of slices each backoff sleep is chopped into. Sleeping in slices (with
+# a shutdown check between each) lets ``shutdown()`` interrupt a retry promptly
+# without blocking the single BatchSpanProcessor worker for the full backoff,
+# while still honouring a monkeypatched ``time.sleep`` in tests.
+_RETRY_SLEEP_SLICES = 20
 
 
 @dataclass(frozen=True)
@@ -33,6 +39,48 @@ class _RouteKey:
     workspace_id: str
     application_id: str
     assessment_run_id: str
+
+
+@dataclass(frozen=True)
+class TelemetryEvent:
+    """A best-effort delivery-observability event handed to the ``on_error``
+    hook. Immutable so a misbehaving hook cannot mutate exporter state.
+
+    - ``kind`` — ``"export_failed"`` when a route-group's POST failed after
+      retries were exhausted (or was interrupted by shutdown); ``"spans_dropped"``
+      when a span was discarded for missing routing attributes.
+    - ``span_count`` / ``group_count`` — how many spans / route-groups the event
+      covers.
+    - ``http_status`` — the last HTTP status seen (``None`` for a network error
+      or a drop).
+    - ``error`` — ``repr`` of the last exception, or a short reason string.
+    - routing fields — present on ``export_failed`` events.
+    - ``missing_attributes`` — the routing attribute names that were absent, on
+      ``spans_dropped`` events.
+    """
+
+    kind: Literal["export_failed", "spans_dropped"]
+    span_count: int
+    group_count: int = 0
+    http_status: Optional[int] = None
+    error: Optional[str] = None
+    tenant_id: Optional[str] = None
+    workspace_id: Optional[str] = None
+    application_id: Optional[str] = None
+    assessment_run_id: Optional[str] = None
+    missing_attributes: Tuple[str, ...] = field(default_factory=tuple)
+
+
+TelemetryEventHook = Callable[[TelemetryEvent], None]
+
+
+@dataclass(frozen=True)
+class ExporterStats:
+    """A point-in-time snapshot of exporter delivery counters."""
+
+    spans_exported: int
+    spans_dropped_unroutable: int
+    export_failures: int
 
 
 class DarkhuntSpanExporter(SpanExporter):
@@ -52,18 +100,40 @@ class DarkhuntSpanExporter(SpanExporter):
         timeout_ms: float,
         internal: bool = False,
         session: Optional[requests.Session] = None,
+        on_error: Optional[TelemetryEventHook] = None,
     ) -> None:
         self._base_url = _strip_trailing_slashes(base_url)
         self._api_key = api_key
         self._timeout_s = timeout_ms / 1000.0
         self._internal = internal
-        self._shutdown_called = False
+        self._on_error = on_error
+        # Set by shutdown() to interrupt an in-flight retry backoff promptly.
+        self._shutdown_event = threading.Event()
         self._session = session or requests.Session()
         # Dedupe drop warnings — log once per (missing-fields, span-name) pair.
         self._dropped_warned: set = set()
+        # Delivery counters, guarded for cross-thread reads via stats().
+        self._stats_lock = threading.Lock()
+        self._spans_exported = 0
+        self._spans_dropped = 0
+        self._export_failures = 0
+
+    @property
+    def _shutdown_called(self) -> bool:
+        return self._shutdown_event.is_set()
+
+    def stats(self) -> ExporterStats:
+        """Return a snapshot of the delivery counters. Safe to call any time,
+        from any thread."""
+        with self._stats_lock:
+            return ExporterStats(
+                spans_exported=self._spans_exported,
+                spans_dropped_unroutable=self._spans_dropped,
+                export_failures=self._export_failures,
+            )
 
     def export(self, spans: Sequence[ReadableSpan]) -> SpanExportResult:
-        if self._shutdown_called:
+        if self._shutdown_event.is_set():
             return SpanExportResult.FAILURE
         try:
             return self._export(spans)
@@ -71,7 +141,7 @@ class DarkhuntSpanExporter(SpanExporter):
             return SpanExportResult.FAILURE
 
     def shutdown(self) -> None:
-        self._shutdown_called = True
+        self._shutdown_event.set()
         try:
             self._session.close()
         except Exception:  # nosec B110 - best-effort close; nothing to recover  # pragma: no cover
@@ -125,7 +195,16 @@ class DarkhuntSpanExporter(SpanExporter):
             missing.append("workspaceId")
         if not application_id:
             missing.append("applicationId")
+        with self._stats_lock:
+            self._spans_dropped += 1
         self._warn_dropped_span(span.name, missing)
+        self._emit(
+            TelemetryEvent(
+                kind="spans_dropped",
+                span_count=1,
+                missing_attributes=tuple(missing),
+            )
+        )
         return None
 
     def _warn_dropped_span(self, span_name: str, missing: List[str]) -> None:
@@ -147,13 +226,42 @@ class DarkhuntSpanExporter(SpanExporter):
         body = request.SerializeToString()
         if not body:
             return True
-        return self._send_with_retry(self._build_url(route), body, route)
+        ok, status, error = self._send_with_retry(self._build_url(route), body, route)
+        if ok:
+            with self._stats_lock:
+                self._spans_exported += len(spans)
+            return True
+        with self._stats_lock:
+            self._export_failures += 1
+        self._emit(
+            TelemetryEvent(
+                kind="export_failed",
+                span_count=len(spans),
+                group_count=1,
+                http_status=status,
+                error=error,
+                tenant_id=route.tenant_id,
+                workspace_id=route.workspace_id,
+                application_id=route.application_id,
+                assessment_run_id=route.assessment_run_id,
+            )
+        )
+        return False
 
     def _build_url(self, route: _RouteKey) -> str:
         path_prefix = "internal" if self._internal else "otlp"
         return f"{self._base_url}/{path_prefix}/t/{_url_quote(route.tenant_id)}/v1/traces"
 
-    def _send_with_retry(self, url: str, body: bytes, route: _RouteKey) -> bool:
+    def _send_with_retry(
+        self, url: str, body: bytes, route: _RouteKey
+    ) -> Tuple[bool, Optional[int], Optional[str]]:
+        """POST ``body`` with bounded, interruptible retry.
+
+        Returns ``(success, last_http_status, last_error)``. Cumulative backoff
+        is capped at the configured export timeout so a single group's retries
+        cannot outlast the flush/shutdown window, and each backoff aborts
+        promptly if :meth:`shutdown` is called mid-retry.
+        """
         headers = {
             "Content-Type": "application/x-protobuf",
             "X-Workspace-Id": route.workspace_id,
@@ -164,26 +272,68 @@ class DarkhuntSpanExporter(SpanExporter):
         if not self._internal:
             headers["Authorization"] = f"Bearer {self._api_key}"
 
+        # Total backoff budget: never sleep longer, cumulatively, than the export
+        # timeout — otherwise a retrying group would block the batch worker (and
+        # shutdown) far past the timeout the operator configured.
+        budget_s = self._timeout_s
+        slept_s = 0.0
+        last_status: Optional[int] = None
+        last_error: Optional[str] = None
         backoff = _INITIAL_BACKOFF_MS
         for attempt in range(_MAX_RETRIES):
+            if self._shutdown_event.is_set():
+                return False, last_status, last_error or "shutdown requested"
             try:
                 resp = self._session.post(url, headers=headers, data=body, timeout=self._timeout_s)
                 if resp.ok:
-                    return True
+                    return True, resp.status_code, None
+                last_status = resp.status_code
                 if resp.status_code not in _RETRYABLE_STATUS:
-                    return False
-            except requests.RequestException:
+                    return False, last_status, None
+            except requests.RequestException as err:
                 # network/timeout — retry
-                pass
+                last_error = repr(err)
             if attempt == _MAX_RETRIES - 1:
+                break
+            remaining = budget_s - slept_s
+            if remaining <= 0:
                 break
             # Add 0–50% jitter so concurrent retrying clients don't synchronize.
             # secrets (not random) to satisfy strict analyzers — jitter has no
             # security impact.
             jitter_ms = secrets.randbelow(max(1, backoff // 2))
-            time.sleep((backoff + jitter_ms) / 1000.0)
+            sleep_s = min((backoff + jitter_ms) / 1000.0, remaining)
+            if self._sleep_for_retry(sleep_s):
+                # Shutdown fired mid-backoff: stop retrying, report failure.
+                return False, last_status, "shutdown requested during retry"
+            slept_s += sleep_s
             backoff = min(backoff * _BACKOFF_MULTIPLIER, _MAX_BACKOFF_MS)
-        return False
+        return False, last_status, last_error
+
+    def _sleep_for_retry(self, seconds: float) -> bool:
+        """Sleep ~``seconds`` in slices, returning True if shutdown was requested
+        mid-sleep (the caller should then stop retrying)."""
+        if self._shutdown_event.is_set():
+            return True
+        if seconds <= 0:
+            return False
+        slice_s = seconds / _RETRY_SLEEP_SLICES
+        for _ in range(_RETRY_SLEEP_SLICES):
+            if self._shutdown_event.is_set():
+                return True
+            time.sleep(slice_s)
+        return self._shutdown_event.is_set()
+
+    def _emit(self, event: TelemetryEvent) -> None:
+        """Invoke the observability hook best-effort. A throwing hook must never
+        break export, so all exceptions are swallowed."""
+        hook = self._on_error
+        if hook is None:
+            return
+        try:
+            hook(event)
+        except Exception:  # nosec B110 - hook is best-effort; never break export
+            pass
 
 
 def _string_attr(value: object) -> str:
@@ -200,4 +350,9 @@ def _url_quote(value: str) -> str:
     return quote(value, safe="")
 
 
-__all__ = ["DarkhuntSpanExporter"]
+__all__ = [
+    "DarkhuntSpanExporter",
+    "TelemetryEvent",
+    "TelemetryEventHook",
+    "ExporterStats",
+]

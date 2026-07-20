@@ -25,6 +25,7 @@ from __future__ import annotations
 
 from ._version import __version__
 from .client import DarkhuntTelemetry, MaskingOptions
+from .exporter import ExporterStats, TelemetryEvent, TelemetryEventHook
 from .masking import CustomPattern, Sanitizer
 from .otel_globals import register_otel_context_globals
 from .span import (
@@ -51,6 +52,10 @@ __all__ = [
     # client
     "DarkhuntTelemetry",
     "MaskingOptions",
+    # delivery observability
+    "TelemetryEvent",
+    "TelemetryEventHook",
+    "ExporterStats",
     # tracing
     "Trace",
     "Span",
