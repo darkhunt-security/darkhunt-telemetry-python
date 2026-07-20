@@ -262,16 +262,7 @@ class DarkhuntSpanExporter(SpanExporter):
         cannot outlast the flush/shutdown window, and each backoff aborts
         promptly if :meth:`shutdown` is called mid-retry.
         """
-        headers = {
-            "Content-Type": "application/x-protobuf",
-            "X-Workspace-Id": route.workspace_id,
-            "X-Application-Id": route.application_id,
-        }
-        # Internal endpoint is permitAll; skip the bearer so we don't attach a
-        # stale/empty token to in-cluster requests.
-        if not self._internal:
-            headers["Authorization"] = f"Bearer {self._api_key}"
-
+        headers = self._build_headers(route)
         # Total backoff budget: never sleep longer, cumulatively, than the export
         # timeout — otherwise a retrying group would block the batch worker (and
         # shutdown) far past the timeout the operator configured.
@@ -283,49 +274,78 @@ class DarkhuntSpanExporter(SpanExporter):
         for attempt in range(_MAX_RETRIES):
             if self._shutdown_event.is_set():
                 return False, last_status, last_error or "shutdown requested"
-            outcome, status, error = self._post_once(url, headers, body)
-            if status is not None:
-                last_status = status
-            if error is not None:
-                last_error = error
+            outcome, last_status, last_error = self._post_once(
+                url, headers, body, last_status, last_error
+            )
             if outcome is not None:
                 return outcome, last_status, None
-            if attempt == _MAX_RETRIES - 1:
-                break
-            remaining = budget_s - slept_s
-            if remaining <= 0:
-                break
-            # Add 0–50% jitter so concurrent retrying clients don't synchronize.
-            # secrets (not random) to satisfy strict analyzers — jitter has no
-            # security impact.
-            jitter_ms = secrets.randbelow(max(1, backoff // 2))
-            sleep_s = min((backoff + jitter_ms) / 1000.0, remaining)
-            if self._sleep_for_retry(sleep_s):
+            action, step_s = self._wait_before_retry(attempt, backoff, budget_s - slept_s)
+            if action == "shutdown":
                 # Shutdown fired mid-backoff: stop retrying, report failure.
                 return False, last_status, "shutdown requested during retry"
-            slept_s += sleep_s
+            if action == "stop":
+                break
+            slept_s += step_s
             backoff = min(backoff * _BACKOFF_MULTIPLIER, _MAX_BACKOFF_MS)
         return False, last_status, last_error
 
-    def _post_once(
-        self, url: str, headers: Dict[str, str], body: bytes
-    ) -> Tuple[Optional[bool], Optional[int], Optional[str]]:
-        """Make one POST attempt and classify the result.
+    def _build_headers(self, route: _RouteKey) -> Dict[str, str]:
+        headers = {
+            "Content-Type": "application/x-protobuf",
+            "X-Workspace-Id": route.workspace_id,
+            "X-Application-Id": route.application_id,
+        }
+        # Internal endpoint is permitAll; skip the bearer so we don't attach a
+        # stale/empty token to in-cluster requests.
+        if not self._internal:
+            headers["Authorization"] = f"Bearer {self._api_key}"
+        return headers
 
-        Returns ``(outcome, status, error)``. ``outcome`` is True on success,
-        False on a non-retryable response, and None when the caller should
-        retry (network error or a retryable status).
+    def _wait_before_retry(
+        self, attempt: int, backoff_ms: int, remaining_s: float
+    ) -> Tuple[str, float]:
+        """Back off before the next attempt.
+
+        Returns ``(action, slept_s)`` where ``action`` is ``"go"`` (retry),
+        ``"stop"`` (last attempt, or backoff budget exhausted) or
+        ``"shutdown"`` (shutdown fired mid-backoff).
+        """
+        if attempt == _MAX_RETRIES - 1 or remaining_s <= 0:
+            return "stop", 0.0
+        # Add 0–50% jitter so concurrent retrying clients don't synchronize.
+        # secrets (not random) to satisfy strict analyzers — jitter has no
+        # security impact.
+        jitter_ms = secrets.randbelow(max(1, backoff_ms // 2))
+        sleep_s = min((backoff_ms + jitter_ms) / 1000.0, remaining_s)
+        if self._sleep_for_retry(sleep_s):
+            return "shutdown", sleep_s
+        return "go", sleep_s
+
+    def _post_once(
+        self,
+        url: str,
+        headers: Dict[str, str],
+        body: bytes,
+        last_status: Optional[int],
+        last_error: Optional[str],
+    ) -> Tuple[Optional[bool], Optional[int], Optional[str]]:
+        """Make one POST attempt, folding the result into the running last-seen
+        status/error so the caller keeps no per-attempt bookkeeping.
+
+        Returns ``(outcome, last_status, last_error)``. ``outcome`` is True on
+        success, False on a non-retryable response, and None when the caller
+        should retry (network error or a retryable status).
         """
         try:
             resp = self._session.post(url, headers=headers, data=body, timeout=self._timeout_s)
         except requests.RequestException as err:
             # network/timeout — retry
-            return None, None, repr(err)
+            return None, last_status, repr(err)
         if resp.ok:
             return True, resp.status_code, None
         if resp.status_code in _RETRYABLE_STATUS:
-            return None, resp.status_code, None
-        return False, resp.status_code, None
+            return None, resp.status_code, last_error
+        return False, resp.status_code, last_error
 
     def _sleep_for_retry(self, seconds: float) -> bool:
         """Sleep ~``seconds`` in slices, returning True if shutdown was requested

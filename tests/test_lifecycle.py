@@ -130,8 +130,8 @@ def test_metadata_and_masking_regression(mem):
         "work",
         metadata={"score": 0.9, "passed": True, "label": "x"},
         input="my email is a@b.com",
-    ):
-        pass
+    ) as s:
+        assert s.otel_span.is_recording()
     t.end()
     (span,) = mem.by_name("work")
     a = span.attributes

@@ -29,13 +29,13 @@ jobs:
       - name: Install (locked, all extras)
         run: uv sync --locked --all-extras --python 3.12
       - name: ruff (lint)
-        run: uv run --no-sync ruff check darkhunt_telemetry tests
+        run: uv run --no-build --no-sync ruff check darkhunt_telemetry tests
       - name: ruff (format check)
-        run: uv run --no-sync ruff format --check darkhunt_telemetry tests
+        run: uv run --no-build --no-sync ruff format --check darkhunt_telemetry tests
       - name: mypy (type-check)
-        run: uv run --no-sync mypy
+        run: uv run --no-build --no-sync mypy
       - name: bandit (security)
-        run: uv run --no-sync bandit -c pyproject.toml -r darkhunt_telemetry
+        run: uv run --no-build --no-sync bandit -c pyproject.toml -r darkhunt_telemetry
 
   test:
     runs-on: ubuntu-latest
@@ -55,7 +55,7 @@ jobs:
       - name: Install (locked, all extras) on Python ${{ matrix.python-version }}
         run: uv sync --locked --all-extras --python ${{ matrix.python-version }}
       - name: Run tests
-        run: uv run --no-sync pytest -q
+        run: uv run --no-build --no-sync pytest -q
 
   build:
     # Prove the package builds (sdist + wheel via hatchling) and passes metadata

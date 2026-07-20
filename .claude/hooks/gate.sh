@@ -11,13 +11,16 @@ if git diff --quiet -- '*.py' && git diff --cached --quiet -- '*.py'; then
   exit 0
 fi
 
+# Sync once up front (fast no-op when the lockfile hasn't moved), then run every
+# tool with --no-sync so no step re-resolves or builds mid-gate.
 out=$(
   {
-    uv run ruff check darkhunt_telemetry tests &&
-      uv run ruff format --check darkhunt_telemetry tests &&
-      uv run mypy &&
-      uv run bandit -c pyproject.toml -r darkhunt_telemetry &&
-      uv run pytest -q
+    uv sync --locked --all-extras --quiet &&
+      uv run --no-build --no-sync ruff check darkhunt_telemetry tests &&
+      uv run --no-build --no-sync ruff format --check darkhunt_telemetry tests &&
+      uv run --no-build --no-sync mypy &&
+      uv run --no-build --no-sync bandit -c pyproject.toml -r darkhunt_telemetry &&
+      uv run --no-build --no-sync pytest -q
   } 2>&1
 )
 if [ $? -ne 0 ]; then
