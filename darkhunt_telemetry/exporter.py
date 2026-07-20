@@ -283,16 +283,13 @@ class DarkhuntSpanExporter(SpanExporter):
         for attempt in range(_MAX_RETRIES):
             if self._shutdown_event.is_set():
                 return False, last_status, last_error or "shutdown requested"
-            try:
-                resp = self._session.post(url, headers=headers, data=body, timeout=self._timeout_s)
-                if resp.ok:
-                    return True, resp.status_code, None
-                last_status = resp.status_code
-                if resp.status_code not in _RETRYABLE_STATUS:
-                    return False, last_status, None
-            except requests.RequestException as err:
-                # network/timeout — retry
-                last_error = repr(err)
+            outcome, status, error = self._post_once(url, headers, body)
+            if status is not None:
+                last_status = status
+            if error is not None:
+                last_error = error
+            if outcome is not None:
+                return outcome, last_status, None
             if attempt == _MAX_RETRIES - 1:
                 break
             remaining = budget_s - slept_s
@@ -309,6 +306,26 @@ class DarkhuntSpanExporter(SpanExporter):
             slept_s += sleep_s
             backoff = min(backoff * _BACKOFF_MULTIPLIER, _MAX_BACKOFF_MS)
         return False, last_status, last_error
+
+    def _post_once(
+        self, url: str, headers: Dict[str, str], body: bytes
+    ) -> Tuple[Optional[bool], Optional[int], Optional[str]]:
+        """Make one POST attempt and classify the result.
+
+        Returns ``(outcome, status, error)``. ``outcome`` is True on success,
+        False on a non-retryable response, and None when the caller should
+        retry (network error or a retryable status).
+        """
+        try:
+            resp = self._session.post(url, headers=headers, data=body, timeout=self._timeout_s)
+        except requests.RequestException as err:
+            # network/timeout — retry
+            return None, None, repr(err)
+        if resp.ok:
+            return True, resp.status_code, None
+        if resp.status_code in _RETRYABLE_STATUS:
+            return None, resp.status_code, None
+        return False, resp.status_code, None
 
     def _sleep_for_retry(self, seconds: float) -> bool:
         """Sleep ~``seconds`` in slices, returning True if shutdown was requested

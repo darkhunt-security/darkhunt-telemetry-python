@@ -110,12 +110,12 @@ def _build_repl(marker: str, validator: Optional[Validator]) -> _Repl:
     """
     if validator is None:
 
-        def repl(m: "re.Match[str]") -> str:
+        def repl(_m: "re.Match[str]") -> str:
             return marker
     else:
 
-        def repl(m: "re.Match[str]") -> str:
-            return marker if validator(m.group(0)) else m.group(0)
+        def repl(_m: "re.Match[str]") -> str:
+            return marker if validator(_m.group(0)) else _m.group(0)
 
     return repl
 
