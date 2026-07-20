@@ -18,6 +18,7 @@ import asyncio
 import uuid
 import warnings
 from datetime import timedelta
+from typing import Optional
 
 import pytest
 
@@ -163,7 +164,7 @@ def test_handoff_interceptor_defaults_and_kwargs():
 
 
 @activity.defn
-async def capture_handoff() -> "list | None":
+async def capture_handoff() -> "Optional[list]":
     """Report the handoff token the activity-inbound interceptor decoded."""
     return current_handoff()
 
@@ -171,7 +172,7 @@ async def capture_handoff() -> "list | None":
 @workflow.defn
 class ChildWorkflow:
     @workflow.run
-    async def run(self, arg: dict) -> "list | None":
+    async def run(self, arg: dict) -> "Optional[list]":
         return await workflow.execute_activity(
             capture_handoff,
             start_to_close_timeout=timedelta(seconds=10),
@@ -184,7 +185,7 @@ class ChildWorkflow:
 @workflow.defn
 class ParentWorkflow:
     @workflow.run
-    async def run(self, token: str) -> "list | None":
+    async def run(self, token: str) -> "Optional[list]":
         # Hand the token to the child as a per-edge override; the outbound
         # interceptor relocates it into the (non-default-encoded) header.
         return await workflow.execute_child_workflow(
