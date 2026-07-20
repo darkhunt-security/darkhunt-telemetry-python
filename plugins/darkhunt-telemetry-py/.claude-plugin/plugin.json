@@ -1,0 +1,10 @@
+{
+  "name": "darkhunt-telemetry-py",
+  "description": "Integration playbook for the darkhunt-telemetry Python SDK — wires LLM tracing, generations, and spans (with built-in secret/PII masking) into a Python service.",
+  "version": "0.5.0",
+  "author": {
+    "name": "Darkhunt Limited",
+    "email": "support@darkhunt.ai"
+  },
+  "homepage": "https://github.com/darkhunt-security/darkhunt-telemetry-python"
+}
