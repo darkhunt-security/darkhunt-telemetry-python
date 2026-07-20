@@ -8,6 +8,8 @@ from __future__ import annotations
 
 import json
 
+import pytest
+
 from darkhunt_telemetry.attributes import ATTR, GEN_AI
 from darkhunt_telemetry.trace import Trace
 
@@ -96,8 +98,6 @@ def test_span_update_fields(mem):
 
 
 def test_span_update_after_end_is_ignored_with_warning(mem):
-    import pytest
-
     t = _trace(mem)
     s = t.span("s")
     s.end()
@@ -123,8 +123,8 @@ def test_generation_update_model_usage_cost(mem):
     a = span.attributes
     assert a[ATTR.MODEL_NAME] == "claude-opus-4-8"
     assert a[GEN_AI.USAGE_INPUT_TOKENS] == 3
-    assert a[GEN_AI.USAGE_COST] == 0.01
+    assert a[GEN_AI.USAGE_COST] == pytest.approx(0.01)
     assert a[ATTR.PROMPT_NAME] == "p"
     assert a[ATTR.PROMPT_VERSION] == "2"
     assert a[GEN_AI.SYSTEM_INSTRUCTIONS] == "be brief"
-    assert json.loads(a[ATTR.MODEL_PARAMETERS])["temperature"] == 0.2
+    assert json.loads(a[ATTR.MODEL_PARAMETERS])["temperature"] == pytest.approx(0.2)
