@@ -131,6 +131,8 @@ def test_metadata_and_masking_regression(mem):
         metadata={"score": 0.9, "passed": True, "label": "x"},
         input="my email is a@b.com",
     ):
+        # No body needed: the metadata/input passed to span() above are what's
+        # under test; the span just has to open and close.
         pass
     t.end()
     (span,) = mem.by_name("work")

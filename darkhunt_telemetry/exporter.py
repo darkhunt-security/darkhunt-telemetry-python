@@ -290,22 +290,35 @@ class DarkhuntSpanExporter(SpanExporter):
                 last_error = error
             if outcome is not None:
                 return outcome, last_status, None
-            if attempt == _MAX_RETRIES - 1:
+            waited = self._wait_before_retry(attempt, backoff, budget_s - slept_s)
+            if waited is None:
                 break
-            remaining = budget_s - slept_s
-            if remaining <= 0:
-                break
-            # Add 0–50% jitter so concurrent retrying clients don't synchronize.
-            # secrets (not random) to satisfy strict analyzers — jitter has no
-            # security impact.
-            jitter_ms = secrets.randbelow(max(1, backoff // 2))
-            sleep_s = min((backoff + jitter_ms) / 1000.0, remaining)
-            if self._sleep_for_retry(sleep_s):
-                # Shutdown fired mid-backoff: stop retrying, report failure.
-                return False, last_status, "shutdown requested during retry"
-            slept_s += sleep_s
+            slept_s += waited
             backoff = min(backoff * _BACKOFF_MULTIPLIER, _MAX_BACKOFF_MS)
+        if self._shutdown_event.is_set():
+            # Shutdown fired mid-backoff: stop retrying, report failure.
+            return False, last_status, "shutdown requested during retry"
         return False, last_status, last_error
+
+    def _wait_before_retry(self, attempt: int, backoff: int, remaining_s: float) -> Optional[float]:
+        """Back off before the next retry attempt.
+
+        Returns the seconds slept, or ``None`` when retrying must stop: the
+        final attempt was just made, the cumulative backoff budget is spent,
+        or shutdown fired mid-backoff.
+        """
+        if attempt == _MAX_RETRIES - 1:
+            return None
+        if remaining_s <= 0:
+            return None
+        # Add 0–50% jitter so concurrent retrying clients don't synchronize.
+        # secrets (not random) to satisfy strict analyzers — jitter has no
+        # security impact.
+        jitter_ms = secrets.randbelow(max(1, backoff // 2))
+        sleep_s = min((backoff + jitter_ms) / 1000.0, remaining_s)
+        if self._sleep_for_retry(sleep_s):
+            return None
+        return sleep_s
 
     def _post_once(
         self, url: str, headers: Dict[str, str], body: bytes
