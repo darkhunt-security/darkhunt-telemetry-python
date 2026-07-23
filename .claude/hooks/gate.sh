@@ -11,13 +11,18 @@ if git diff --quiet -- '*.py' && git diff --cached --quiet -- '*.py'; then
   exit 0
 fi
 
+# Mirror CI: sync the env once up front (locked, all extras), then run every
+# tool with --no-sync --no-build so `uv run` never resolves/builds packages
+# itself (sdist builds execute arbitrary setup scripts; locked deps are
+# installed in the single sync step instead).
 out=$(
   {
-    uv run ruff check darkhunt_telemetry tests &&
-      uv run ruff format --check darkhunt_telemetry tests &&
-      uv run mypy &&
-      uv run bandit -c pyproject.toml -r darkhunt_telemetry &&
-      uv run pytest -q
+    uv sync --quiet --locked --all-extras &&
+      uv run --no-sync --no-build ruff check darkhunt_telemetry tests &&
+      uv run --no-sync --no-build ruff format --check darkhunt_telemetry tests &&
+      uv run --no-sync --no-build mypy &&
+      uv run --no-sync --no-build bandit -c pyproject.toml -r darkhunt_telemetry &&
+      uv run --no-sync --no-build pytest -q
   } 2>&1
 )
 if [ $? -ne 0 ]; then
