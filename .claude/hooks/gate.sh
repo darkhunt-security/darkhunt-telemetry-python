@@ -13,11 +13,13 @@ fi
 
 # Mirror CI: sync the env once up front (locked, all extras), then run every
 # tool with --no-sync --no-build so `uv run` never resolves/builds packages
-# itself (sdist builds execute arbitrary setup scripts; locked deps are
-# installed in the single sync step instead).
+# itself (sdist builds execute arbitrary setup scripts). --no-build holds for
+# the sync too: every locked dep ships a wheel, and the project itself is not
+# installed (--no-install-project) — pytest imports it from the repo root via
+# the `pythonpath` setting in pyproject.toml.
 out=$(
   {
-    uv sync --quiet --locked --all-extras &&
+    uv sync --quiet --locked --all-extras --no-build --no-install-project &&
       uv run --no-sync --no-build ruff check darkhunt_telemetry tests &&
       uv run --no-sync --no-build ruff format --check darkhunt_telemetry tests &&
       uv run --no-sync --no-build mypy &&

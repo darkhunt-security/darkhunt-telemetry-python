@@ -77,6 +77,10 @@ packages = ["darkhunt_telemetry"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+# CI/gate envs sync with --no-build --no-install-project (supply-chain hardening:
+# no setup scripts run at install time), so the package is imported straight from
+# the repo root instead of an installed distribution.
+pythonpath = ["."]
 
 [tool.ruff]
 line-length = 100
