@@ -24,7 +24,7 @@ def _restore_global_state():
         og._registered = saved_flag
 
 
-def test_installs_default_when_no_traceparent_propagator():
+def test_installs_default_when_no_traceparent_propagator(monkeypatch):
     """With no W3C propagator present, the bootstrap installs the composite."""
 
     class _NoFieldPropagator:
@@ -37,7 +37,7 @@ def test_installs_default_when_no_traceparent_propagator():
         def extract(self, carrier, context=None, getter=None):  # pragma: no cover
             return context
 
-    og._registered = False
+    monkeypatch.setattr(og, "_registered", False)
     propagate.set_global_textmap(_NoFieldPropagator())
 
     installed = og.register_otel_context_globals()
@@ -46,20 +46,20 @@ def test_installs_default_when_no_traceparent_propagator():
     assert "traceparent" in set(propagate.get_global_textmap().fields)
 
 
-def test_noop_when_traceparent_already_present():
+def test_noop_when_traceparent_already_present(monkeypatch):
     """When a W3C propagator is already global, the bootstrap does not replace
     it and reports that it installed nothing."""
     from opentelemetry.trace.propagation.tracecontext import (
         TraceContextTextMapPropagator,
     )
 
-    og._registered = False
+    monkeypatch.setattr(og, "_registered", False)
     propagate.set_global_textmap(TraceContextTextMapPropagator())
 
     assert og.register_otel_context_globals() is False
 
 
-def test_idempotent_after_first_call():
+def test_idempotent_after_first_call(monkeypatch):
     """A second call short-circuits on the module flag and returns False."""
-    og._registered = True
+    monkeypatch.setattr(og, "_registered", True)
     assert og.register_otel_context_globals() is False
