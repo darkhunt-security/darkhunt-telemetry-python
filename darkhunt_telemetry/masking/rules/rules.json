@@ -1,5 +1,5 @@
 {
-  "version": "2026.5.6",
+  "version": "2026.8.16",
   "rules": [
     {
       "name": "darkhunt_api_key",
@@ -592,13 +592,17 @@
     },
     {
       "name": "us_passport",
-      "description": "US passport number (8-9 digits, optional letter prefix)",
+      "description": "US passport number (8-9 digits, optional letter prefix), anchored to a passport keyword",
       "examples": [
-        "C12345678",
-        "456789012"
+        "passport: C12345678",
+        "Passport No. 456789012",
+        "my passport is C12345678",
+        "\"passportNumber\": \"C12345678\"",
+        "Reisepass: C12345678"
       ],
       "marker": "[US_PASSPORT]",
-      "pattern": "\\b[A-Z]?\\d{8,9}\\b"
+      "pattern": "\\b(?:passport|passeport|reisepass|pasaporte)s?(?:[^A-Za-z0-9]{0,4}(?:number|nummer|num|nr|no|id|is)\\.?){0,2}[^A-Za-z0-9]{0,6}[A-Z]?\\d{8,9}\\b",
+      "caseSensitive": false
     },
     {
       "name": "ipv6",
