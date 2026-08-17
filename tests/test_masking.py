@@ -39,6 +39,79 @@ def test_all_bundled_examples_are_masked():
             assert s.sanitize(ex) != ex, f"{rule['name']} did not mask {ex!r}"
 
 
+# --- Rule reachability ------------------------------------------------------
+#
+# ``test_all_bundled_examples_are_masked`` proves "some rule masked this", not
+# "this rule masked this". Every secret rule emits the same ``[SECRET]``, so a
+# rule whose examples are consumed by an earlier, more generic rule still
+# produces the expected output and the test passes while the rule itself is
+# dead code. These tests close that hole.
+#
+# Engine model: this SDK applies rules strictly sequentially in declared file
+# order (``Sanitizer.sanitize``), each rule's matches replaced before the next
+# rule runs. So for a rule R with example E:
+#   1. isolation  -- R compiled ON ITS OWN must redact E (R is well-formed and
+#                    E really is an instance of R).
+#   2. shadowing  -- the rules declared BEFORE R, run as a pipeline, must leave
+#                    E untouched (R is what actually claims E).
+#
+# trace-hub's Java engine merges same-marker/same-flags/same-validator rules
+# into one alternation and runs the buckets in first-appearance order, so it can
+# shadow *more* than this sequential model does. A rule that fails here is dead
+# in every engine; passing here does not by itself prove reachability there.
+
+
+def _sanitizer_over(rules):
+    """Sanitizer over an arbitrary slice of the bundled ruleset, built through
+    the real production compile path (flags, re.ASCII, validators)."""
+    return Sanitizer(rules_file={"version": _rules()["version"], "rules": list(rules)})
+
+
+def _claims(rule, text):
+    """Does this single rule, on its own, redact ``text``?"""
+    return _sanitizer_over([rule]).sanitize(text) != text
+
+
+def _rule_example_cases():
+    for index, rule in enumerate(_rules()["rules"]):
+        for ex in rule.get("examples", []) or []:
+            yield pytest.param(index, rule, ex, id=f"{rule['name']}-{ex[:40]}")
+
+
+@pytest.mark.parametrize(("index", "rule", "example"), list(_rule_example_cases()))
+def test_rule_matches_its_own_example(index, rule, example):
+    wrapped = f"<< {example} >>"
+    assert _claims(rule, wrapped), (
+        f"Rule {rule['name']!r} does not match its own example. The pattern and the "
+        f"example have drifted apart -- whatever redacts this example in the full "
+        f"pipeline, it is not {rule['name']!r}. Fix the pattern or the example in "
+        f"data-masking-rules.yaml. (pattern: {rule['pattern']})"
+    )
+
+
+@pytest.mark.parametrize(("index", "rule", "example"), list(_rule_example_cases()))
+def test_rule_is_reachable(index, rule, example):
+    all_rules = _rules()["rules"]
+    wrapped = f"<< {example} >>"
+    earlier = all_rules[:index]
+    prefix_output = _sanitizer_over(earlier).sanitize(wrapped)
+    if prefix_output == wrapped:
+        return
+    culprit = next((r["name"] for r in earlier if _claims(r, wrapped)), "(unknown)")
+    pytest.fail(
+        f"Rule {rule['name']!r} is UNREACHABLE: rule {culprit!r} is declared earlier in "
+        f"data-masking-rules.yaml and already redacts this example, so {rule['name']!r} "
+        f"never runs on it. Both emit {rule['marker']!r}, which is why "
+        f"test_all_bundled_examples_are_masked still passes -- the rule is dead code.\n"
+        f"  example        : {example}\n"
+        f"  after {culprit!r} : {prefix_output}\n"
+        f"Fix: move {rule['name']!r} ABOVE {culprit!r} in data-masking-rules.yaml "
+        f"(specific-provider rules precede generic catch-alls), with a comment saying "
+        f"why -- or delete {rule['name']!r} if {culprit!r} genuinely covers every case "
+        f"it would."
+    )
+
+
 def test_luhn_and_credit_card():
     assert luhn("4242424242424242")
     assert not luhn("4242424242424241")

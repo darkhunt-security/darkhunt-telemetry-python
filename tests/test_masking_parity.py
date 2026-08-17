@@ -35,6 +35,30 @@ def test_all_bundled_examples_still_masked_under_ascii():
             assert s.sanitize(ex) != ex, f"{rule['name']} did not mask {ex!r}"
 
 
+def test_every_rule_still_matches_its_own_example_under_ascii():
+    """Per-RULE parity, not just per-pipeline.
+
+    The test above runs the whole ruleset, so a rule whose own pattern stopped
+    matching under ``re.ASCII`` would be silently covered by whichever other
+    rule happens to claim the same example (all the secret rules emit the same
+    ``[SECRET]``). Compile each rule ON ITS OWN so a regression is attributed
+    to the rule that actually broke.
+    """
+    version = _rules()["version"]
+    broken = []
+    for rule in _rules()["rules"]:
+        solo = Sanitizer(rules_file={"version": version, "rules": [rule]})
+        for ex in rule.get("examples", []) or []:
+            wrapped = f"<< {ex} >>"
+            if solo.sanitize(wrapped) == wrapped:
+                broken.append(f"  {rule['name']}: pattern {rule['pattern']!r} vs example {ex!r}")
+    assert not broken, (
+        "These rules do not match their own examples when compiled in isolation, so "
+        "whatever redacts those examples in the full pipeline is a DIFFERENT rule:\n"
+        + "\n".join(broken)
+    )
+
+
 def test_ssn_ascii_masked_but_unicode_digits_not():
     s = Sanitizer()
 
