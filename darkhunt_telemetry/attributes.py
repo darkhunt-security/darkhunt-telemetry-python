@@ -9,6 +9,15 @@ from __future__ import annotations
 
 
 class ATTR:
+    # OTel semconv ``service.name``, emitted as a SPAN attribute rather than a
+    # Resource attribute. The backend resolves topology node identity from the
+    # merged attributes of a trace group, and span attributes outrank the Resource
+    # there — so this lets several logical agents in one process (one client, one
+    # TracerProvider, one Resource) surface as separate topology nodes.
+    #
+    # Set indirectly via ``Trace(agent=...)``; see the invariant documented there —
+    # exactly one distinct value per trace id.
+    SERVICE_NAME = "service.name"
     OBSERVATION_TYPE = "darkhunt.observation.type"
     OBSERVATION_INPUT = "darkhunt.observation.input"
     OBSERVATION_OUTPUT = "darkhunt.observation.output"

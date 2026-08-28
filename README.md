@@ -66,6 +66,10 @@ dh = DarkhuntTelemetry(
 )
 ```
 
+> Several logical agents in one process? `service_name` is per client, so they would
+> share a node — name them per trace with
+> [`agent`](#several-agents-in-one-process) instead.
+
 In-cluster service-to-service callers post to the permitAll `/internal/...` path
 and need no key:
 
@@ -255,6 +259,64 @@ trace = dh.trace("analyst-agent", handoff_from=[token], session_id=sid, user_id=
 `handoff_from[0]` becomes the **parent edge** (the topology arrow) *and* an
 `agent_handoff` link; further entries are supplementary links (fan-in). Give
 **each agent its own `service_name`** — that string is the topology node.
+
+### Several agents in one process
+
+`service_name` sets the OTel Resource, which is fixed per `TracerProvider` — i.e.
+per client. A process hosting several **logical** agents behind one shared client
+therefore renders as a single node named after the process.
+
+When that's your shape, name the agent **per trace** instead. One client, one
+provider, one Resource:
+
+```python
+# One client for the process. Routing stays off it when it varies per request.
+dh = DarkhuntTelemetry(service_name="alludium-web")
+
+research = dh.trace(
+    "research.run",
+    agent="research",             # ← the topology node for this trace
+    session_id=sid,               # ← must be shared across the agents in one run
+    tenant_id=t, workspace_id=w, application_id=a,
+)
+
+scoring = dh.trace(
+    "score.deal",
+    agent="deal-scoring",
+    session_id=sid,               # ← same session
+    handoff_from=[research.handoff_token()],
+    tenant_id=t, workspace_id=w, application_id=a,
+)
+```
+
+This composes with [multi-tenant routing](#configuration): `agent` and the routing
+fields are independent, so a host serving many customers from one process passes
+**both** per trace — `tenant_id` / `workspace_id` / `application_id` from the request
+context, `agent` from whichever logical agent is running. Only `service_name` stays
+on the client.
+
+`agent` emits `service.name` as a **span** attribute on the root and on every child
+span. The backend resolves a trace group's identity from merged attributes, where
+span attributes outrank the Resource — so each agent becomes its own node while
+`service_name` stays the fallback for traces that don't set it.
+
+Two consequences worth knowing before adopting it:
+
+> **An agent-scoped trace is always a new root.** Identity is resolved once per
+> trace id, so two agents sharing a trace would collapse onto whichever name merged
+> first. To make that impossible, passing `agent` ignores both `handoff_from[0]` and
+> any ambient active span when parenting. `handoff_from` still records every upstream
+> as an `agent_handoff` **link**, and links are what the topology walks to draw the
+> edge — so the graph is unchanged; the cross-agent parent chain is what you give up.
+> (A trace then covers one agent's slice rather than the end-to-end request.)
+
+> **Share `session_id` across the agents in one run.** With the parent chain gone,
+> edges come from links alone, and links resolve **within a session**. Different
+> sessions, no edge.
+
+Use a small, stable set of values (`"research"`, `"deal-scoring"`) — never a request
+id or anything derived from user input. Each distinct value is a permanent topology
+node.
 
 Carry the token across a transport in its **metadata channel, never the business
 payload** (dependency-free helpers included):

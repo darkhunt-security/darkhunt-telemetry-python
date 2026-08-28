@@ -528,6 +528,11 @@ class Span(ActiveChildHost):
 
     def _apply_trace_attrs(self) -> None:
         t = self._trace_obj
+        # Must be on EVERY span, not just the trace root: the backend resolves node
+        # identity per span attribute set, so a root-only value would move the root
+        # to the agent's node and strand its whole subtree on the Resource's node.
+        if t.agent:
+            self._otel_span.set_attribute(ATTR.SERVICE_NAME, t.agent)
         self._otel_span.set_attribute(ATTR.TENANT_ID, t.tenant_id)
         self._otel_span.set_attribute(ATTR.WORKSPACE_ID, t.workspace_id)
         self._otel_span.set_attribute(ATTR.APPLICATION_ID, t.application_id)

@@ -62,6 +62,7 @@ class Trace(ActiveChildHost):
         metadata: Optional[Metadata] = None,
         release: Optional[str] = None,
         environment: Optional[str] = None,
+        agent: Optional[str] = None,
         links: Optional[Sequence[Context]] = None,
         handoff_from: Optional[Sequence[Union[HandoffToken, Context]]] = None,
         observation_type: ObservationType = "agent",
@@ -85,6 +86,7 @@ class Trace(ActiveChildHost):
         self._metadata = metadata
         self._release = release
         self._environment = environment
+        self._agent = agent
         self._observation_type = observation_type or "agent"
         self._input = input
         self._output = output
@@ -99,7 +101,21 @@ class Trace(ActiveChildHost):
         # topology from. That upstream also stays an agent_handoff LINK. A declared
         # handoff_from[0] wins over any ambient active span. When handoff_from is
         # empty/unresolvable, fall back to the active context.
-        parent_context = handoff_contexts[0] if handoff_contexts else context_api.get_current()
+        #
+        # EXCEPT when ``agent`` is set. Node identity is resolved once per trace id,
+        # from that group's merged attributes, so two agents sharing a trace collapse
+        # onto whichever service.name merged first — silently, and dependent on span
+        # order. Rather than document "don't nest agents", make it unrepresentable: an
+        # agent-scoped trace is always a fresh root, ignoring handoff_from[0] AND any
+        # ambient span (a shared HTTP/server span would otherwise merge every agent
+        # running beneath it). An empty Context() carries no span, hence no parent.
+        # Upstreams stay agent_handoff LINKS above — which is what topology
+        # reconstruction resolves edges from — so only the cross-agent parentSpanId
+        # chain is given up, not the edge.
+        if agent is not None:
+            parent_context = Context()
+        else:
+            parent_context = handoff_contexts[0] if handoff_contexts else context_api.get_current()
         self._root_span = tracer.start_span(
             self.mask_name(name or "trace"),
             context=parent_context,
@@ -178,6 +194,11 @@ class Trace(ActiveChildHost):
     @property
     def user_email(self) -> Optional[str]:
         return self._user_email
+
+    @property
+    def agent(self) -> Optional[str]:
+        """Logical agent owning this trace — the topology node identity."""
+        return self._agent
 
     # --- mutation ---
     def update(
@@ -260,6 +281,9 @@ class Trace(ActiveChildHost):
     def _apply_trace_attrs(self) -> None:
         span = self._root_span
         span.set_attribute(ATTR.OBSERVATION_TYPE, self._observation_type)
+        # Overrides the Resource service.name for this trace group — see ``agent``.
+        if self._agent:
+            span.set_attribute(ATTR.SERVICE_NAME, self._agent)
         span.set_attribute(ATTR.TENANT_ID, self._tenant_id)
         span.set_attribute(ATTR.WORKSPACE_ID, self._workspace_id)
         span.set_attribute(ATTR.APPLICATION_ID, self._application_id)
