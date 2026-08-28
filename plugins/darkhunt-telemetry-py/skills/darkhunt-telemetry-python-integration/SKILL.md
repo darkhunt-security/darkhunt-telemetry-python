@@ -148,9 +148,22 @@ darkhunt_create_application    { workspace, name, type: 'OBSERVABILITY', descrip
 
 **Don't construct `DarkhuntTelemetry` per request.** Each construction spins up a
 `TracerProvider` + `BatchSpanProcessor` and registers an `atexit` handler, so a
-per-call client leaks resources and prevents batching. `service.name` is a
-**per-client** OTel resource, so distinct agent names need distinct clients — in a
-multi-agent process, **memoize one client per `(application_id, service_name)`**:
+per-call client leaks resources and prevents batching.
+
+**Several logical agents in ONE process → ONE client, and `agent` per trace.**
+`service.name` is a per-client OTel Resource, so it cannot vary within a process —
+but `dh.trace(..., agent="research")` emits `service.name` as a *span* attribute,
+which outranks the Resource at ingest, so each agent gets its own topology node from
+a single client. Prefer this over a client registry: it is one object instead of N
+providers/exporters/timers, and it does not tie your deployment shape to the graph
+you want. Two rules come with it — the trace becomes a **new root** (`handoff_from[0]`
+is recorded as a link, not a parent, so the edge survives but the cross-agent parent
+chain does not), and every agent in one run must share a `session_id`, because links
+resolve within a session.
+
+A memoized **client per distinct `(application_id, service_name)`** is still right
+when the names really are separate *services* — different processes, or one process
+fronting genuinely distinct deployments:
 
 ```python
 from darkhunt_telemetry import DarkhuntTelemetry
@@ -274,6 +287,21 @@ on the client if constant for the process; pass per-trace if multi-tenant
 is still missing. `assessment_run_id` is optional (Darkhunt-internal grouping);
 omit for general production tracing.
 
+Routing and `agent` are **independent**, so a multi-tenant host that also runs
+several logical agents in the process passes both per trace — routing from the
+request context, `agent` from whichever agent is running, and only `service_name`
+on the client:
+
+```python
+dh = DarkhuntTelemetry(service_name="alludium-web")   # one client, forever
+dh.trace(
+    "research.run",
+    agent="research",                 # the topology node
+    session_id=req.session_id,        # MUST be shared across the run's agents
+    tenant_id=req.tenant_id, workspace_id=req.ws_id, application_id=req.app_id,
+)
+```
+
 ## `session_id` and `user_id` — set them every time
 
 Technically optional, but **every integration should set them**. Traces sharing a
@@ -331,6 +359,19 @@ When the service is one agent in a multi-agent system, Darkhunt reconstructs the
 agent** — that string is the topology node. The graph is drawn from the
 cross-service `parentSpanId` chain, so the whole job is to make each agent's root
 trace **nest under its caller**.
+
+> **Several logical agents in ONE process?** `service_name` is the OTel Resource, fixed per
+> `TracerProvider` (i.e. per client), so a shared client renders ONE node named after the
+> process. Don't reach for a client-per-agent registry — pass **`agent`** per trace instead:
+> `dh.trace("research.run", agent="research", session_id=sid)`. It emits `service.name` as a
+> *span* attribute on the root and every child (span attrs outrank the Resource at ingest), so
+> each agent gets its own node from one client. **Two rules come with it:** (1) an agent-scoped
+> trace is deliberately a **new root** — it ignores `handoff_from[0]` and any ambient span when
+> parenting, because node identity resolves once per trace id and two agents in one trace would
+> silently collapse; upstreams stay `agent_handoff` links, so the edge survives but the
+> cross-agent parent chain does not. (2) Since edges then come from links alone, and links
+> resolve **within a session**, every agent in one run MUST share a `session_id` or no edge is
+> drawn. Use a small stable set of agent names — each distinct value is a permanent node.
 
 ### The one thing to get right: nest via `handoff_from`
 

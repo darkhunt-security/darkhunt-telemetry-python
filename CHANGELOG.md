@@ -17,6 +17,24 @@ published patch.
 
 ### Added
 
+- **Per-trace agent identity (`agent`).** New `agent` argument on `dh.trace(...)`
+  names the **topology node** for that trace, so a process hosting several logical
+  agents behind one shared client no longer collapses onto a single node. It emits
+  `service.name` as a **span** attribute on the root and every child span; the
+  backend resolves a trace group's identity from merged attributes, where span
+  attributes outrank the Resource, so `service_name` remains the fallback for traces
+  that don't set `agent`. Behaviour is unchanged when it is unset.
+
+  Two behaviours to know: node identity is resolved once per trace id, so an
+  agent-scoped trace is deliberately started as a **new root** — it ignores both
+  `handoff_from[0]` and any ambient active span when parenting, which makes "two
+  agents in one trace" unrepresentable rather than a rule to remember. Upstreams
+  stay `agent_handoff` links (what topology reconstruction resolves edges from), so
+  the graph is unchanged, but because edges then come from links alone — and links
+  resolve **within a session** — every agent in one run must share a `session_id`.
+
+  Matches `agent` in the TypeScript SDK; both emit the same `service.name` key.
+
 - Delivery observability: an optional `on_error` hook on `DarkhuntTelemetry` /
   `DarkhuntSpanExporter` plus exporter counters (`stats()`), so dropped or
   failed-to-export spans are observable instead of silently swallowed.

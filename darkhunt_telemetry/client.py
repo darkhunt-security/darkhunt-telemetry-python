@@ -223,6 +223,7 @@ class DarkhuntTelemetry:
         metadata: Optional[dict] = None,
         release: Optional[str] = None,
         environment: Optional[str] = None,
+        agent: Optional[str] = None,
         links: Optional[Sequence[Any]] = None,
         handoff_from: Optional[Sequence[Any]] = None,
         observation_type: str = "agent",
@@ -232,7 +233,38 @@ class DarkhuntTelemetry:
     ) -> Trace:
         """Open a new trace. Routing fields merge ``per-call > constructor
         default > env``; raises :class:`ValueError` if tenant/workspace/application
-        is still missing."""
+        is still missing.
+
+        ``agent`` names the logical agent this trace belongs to — the **topology
+        node identity** — for a process hosting several agents behind one client.
+
+        Normally node identity is the OTel Resource ``service.name``, which is fixed
+        per ``TracerProvider`` (i.e. per client), so one shared client renders one
+        node. Setting ``agent`` emits ``service.name`` as a *span* attribute on the
+        root and on every child span instead; the backend resolves a trace group's
+        identity from merged attributes where span attributes outrank the Resource,
+        so each agent surfaces as its own node. The client's ``service_name`` stays
+        as the fallback for traces that do not set this.
+
+        **This trace becomes a new root.** Identity is resolved once per trace id, so
+        two agents sharing a trace would collapse onto whichever name is merged first.
+        To make that unrepresentable, passing ``agent`` starts a fresh trace: the root
+        is parented under no one, ignoring both ``handoff_from[0]`` and any ambient
+        active span. ``handoff_from`` still records every upstream as an
+        ``agent_handoff`` link, and links are what the topology walks to draw the edge
+        — so the graph is unchanged, the ``parentSpanId`` chain between agents is not.
+
+        Because edges are then resolved from links alone, and links resolve **within a
+        session**, every agent in one logical run must share the same ``session_id``,
+        or the handoff edge cannot be drawn.
+
+        Use a small, stable set of values (``"research"``, ``"deal-scoring"``) — never
+        a request id or anything derived from user input. Each distinct value is a
+        permanent node in the topology. Sent verbatim: not masked.
+
+        Leave unset for a single-agent process and configure ``service_name`` on the
+        client instead.
+        """
         merged_tenant = tenant_id if tenant_id is not None else self._tenant_id
         merged_workspace = workspace_id if workspace_id is not None else self._workspace_id
         merged_application = application_id if application_id is not None else self._application_id
@@ -269,6 +301,7 @@ class DarkhuntTelemetry:
             metadata=metadata,
             release=merged_release,
             environment=merged_environment,
+            agent=agent,
             links=links,
             handoff_from=handoff_from,
             observation_type=observation_type,  # type: ignore[arg-type]
