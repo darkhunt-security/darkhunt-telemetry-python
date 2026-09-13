@@ -1,10 +1,10 @@
 """Span + Generation — port of ``src/span.ts``.
 
 A :class:`Span` wraps an OTel span and applies the Darkhunt attribute schema
-(routing attrs, masked input/output, metadata, tool fields). A
+(routing attrs, input/output, metadata, tool fields). A
 :class:`Generation` is a Span specialized for LLM round-trips (model / usage /
 cost). Both are created through a :class:`~darkhunt_telemetry.trace.Trace` (or a
-parent Span) so masking + routing context flow down automatically.
+parent Span) so routing context flows down automatically.
 """
 
 from __future__ import annotations
@@ -32,13 +32,12 @@ from opentelemetry.trace import (
 from opentelemetry.trace.propagation.tracecontext import TraceContextTextMapPropagator
 
 from .attributes import ATTR, GEN_AI
-from .masking import safe_json_dumps
+from .serialization import safe_json_dumps
 from .types import ChatMessage, Cost, Metadata, ObservationLevel, ObservationType, Usage
 
 if TYPE_CHECKING:  # avoid a runtime import cycle with trace.py
     from types import TracebackType
 
-    from .masking import Sanitizer
     from .trace import Trace
 
 # A HandoffToken is an opaque, serializable W3C ``traceparent`` string.
@@ -77,77 +76,55 @@ def _to_nanos(seconds: Optional[float]) -> Optional[int]:
 
 
 class AttributeWriter:
-    """The single place that knows how to "sanitize a value then write it as an
-    OTel attribute" for the Darkhunt schema. Both :class:`Span` and
+    """The single place that knows how to write a value as an OTel attribute for
+    the Darkhunt schema. Both :class:`Span` and
     :class:`~darkhunt_telemetry.trace.Trace` wrap their underlying OTel span in
-    one of these so masking + serialization behave identically on the wire,
-    regardless of who is emitting.
-
-    A ``None`` sanitizer means masking is disabled: values pass through raw.
+    one of these so serialization behaves identically on the wire, regardless of
+    who is emitting. Values are written verbatim.
     """
 
-    __slots__ = ("_span", "_sanitizer")
+    __slots__ = ("_span",)
 
-    def __init__(self, span: OtelSpan, sanitizer: "Optional[Sanitizer]") -> None:
+    def __init__(self, span: OtelSpan) -> None:
         self._span = span
-        self._sanitizer = sanitizer
-
-    def mask_string(self, value: str) -> str:
-        """Mask a plain string (identity when masking is disabled)."""
-        return self._sanitizer.sanitize(value) if self._sanitizer is not None else value
 
     def set_io(self, key: str, value: Any) -> None:
-        """Set an input/output-style attribute: sanitize the (possibly
-        structured) value, then store strings verbatim and everything else as a
-        JSON string. ``None`` is skipped."""
+        """Set an input/output-style attribute: store strings verbatim and
+        everything else as a JSON string. ``None`` is skipped."""
         if value is None:
             return
-        sanitized = (
-            self._sanitizer.sanitize_unknown(value) if self._sanitizer is not None else value
-        )
-        if isinstance(sanitized, str):
-            self._span.set_attribute(key, sanitized)
+        if isinstance(value, str):
+            self._span.set_attribute(key, value)
         else:
-            self._span.set_attribute(key, safe_json_dumps(sanitized))
+            self._span.set_attribute(key, safe_json_dumps(value))
 
-    def set_masked_string(self, key: str, value: Optional[str]) -> None:
-        """Set a masked string attribute; falsy values (``None``/empty) skipped."""
+    def set_string(self, key: str, value: Optional[str]) -> None:
+        """Set a string attribute; falsy values (``None``/empty) skipped."""
         if value:
-            self._span.set_attribute(key, self.mask_string(value))
+            self._span.set_attribute(key, value)
 
-    def set_masked_json(self, key: str, value: Any) -> None:
-        """Sanitize a structured value and store it as a JSON string. ``None`` is
-        skipped."""
+    def set_json(self, key: str, value: Any) -> None:
+        """Store a structured value as a JSON string. ``None`` is skipped."""
         if value is None:
             return
-        masked = self._sanitizer.sanitize_unknown(value) if self._sanitizer is not None else value
-        self._span.set_attribute(key, safe_json_dumps(masked))
+        self._span.set_attribute(key, safe_json_dumps(value))
 
     def apply_metadata(self, metadata: Metadata) -> None:
         """Fan ``metadata`` out into one ``METADATA_PREFIX + key`` attribute per
-        entry, masking both keys and values."""
+        entry."""
         for k, v in metadata.items():
             if v is None:
                 continue
-            # Keys land in the OTel attribute name verbatim; mask them too.
-            if self._sanitizer is not None and isinstance(k, str):
-                safe_key = self._sanitizer.sanitize(k)
+            key = f"{ATTR.METADATA_PREFIX}{k}"
+            if isinstance(v, (str, int, float)):  # bool is an int subclass
+                self._span.set_attribute(key, v)
             else:
-                safe_key = str(k)
-            key = f"{ATTR.METADATA_PREFIX}{safe_key}"
-            value = self._sanitizer.sanitize_unknown(v) if self._sanitizer is not None else v
-            if isinstance(value, (str, int, float)):  # bool is an int subclass
-                self._span.set_attribute(key, value)
-            else:
-                self._span.set_attribute(key, safe_json_dumps(value))
+                self._span.set_attribute(key, safe_json_dumps(v))
 
 
-def apply_metadata_attrs(
-    span: OtelSpan, metadata: Metadata, sanitizer: "Optional[Sanitizer]"
-) -> None:
-    """Backwards-compatible module-level shim delegating to
-    :meth:`AttributeWriter.apply_metadata`."""
-    AttributeWriter(span, sanitizer).apply_metadata(metadata)
+def apply_metadata_attrs(span: OtelSpan, metadata: Metadata) -> None:
+    """Module-level shim delegating to :meth:`AttributeWriter.apply_metadata`."""
+    AttributeWriter(span).apply_metadata(metadata)
 
 
 def to_otel_links(contexts: "Optional[Sequence[Context]]") -> List[Link]:
@@ -358,16 +335,15 @@ class Span(ActiveChildHost):
         opts = options or _SpanOptions()
 
         links = to_otel_links(opts.links)
-        # Span name lands on the wire verbatim — mask in case user-controlled.
         self._otel_span: OtelSpan = tracer.start_span(
-            trace.mask_name(name),
+            name,
             context=parent_ctx,
             links=links or None,
             start_time=_to_nanos(opts.start_time),
         )
         self._ctx = trace_api.set_span_in_context(self._otel_span, parent_ctx)
         self._ended = False
-        self._writer = AttributeWriter(self._otel_span, self._trace_obj.sanitizer)
+        self._writer = AttributeWriter(self._otel_span)
 
         self._otel_span.set_attribute(ATTR.OBSERVATION_TYPE, opts.observation_type or "span")
         self._apply_trace_attrs()
@@ -379,8 +355,8 @@ class Span(ActiveChildHost):
             self._writer.apply_metadata(opts.metadata)
         if opts.level:
             self._otel_span.set_attribute(ATTR.OBSERVATION_LEVEL, opts.level)
-        self._writer.set_masked_string(ATTR.STATUS_MESSAGE, opts.status_message)
-        self._writer.set_masked_string(ATTR.VERSION, opts.version)
+        self._writer.set_string(ATTR.STATUS_MESSAGE, opts.status_message)
+        self._writer.set_string(ATTR.VERSION, opts.version)
         self._set_tool_attrs(opts.tool_name, opts.tool_call_id, opts.tool_arguments)
 
     # --- ActiveChildHost wiring ---
@@ -468,23 +444,21 @@ class Span(ActiveChildHost):
             )
             return self
         if name is not None:
-            self._otel_span.update_name(self._trace_obj.mask_name(name))
+            self._otel_span.update_name(name)
         if input is not None:
             self._writer.set_io(ATTR.OBSERVATION_INPUT, input)
         if output is not None:
             self._writer.set_io(ATTR.OBSERVATION_OUTPUT, output)
-        self._writer.set_masked_json(GEN_AI.INPUT_MESSAGES, input_messages)
-        self._writer.set_masked_json(GEN_AI.OUTPUT_MESSAGES, output_messages)
+        self._writer.set_json(GEN_AI.INPUT_MESSAGES, input_messages)
+        self._writer.set_json(GEN_AI.OUTPUT_MESSAGES, output_messages)
         if system_instructions is not None:
-            self._otel_span.set_attribute(
-                GEN_AI.SYSTEM_INSTRUCTIONS, self._writer.mask_string(system_instructions)
-            )
+            self._otel_span.set_attribute(GEN_AI.SYSTEM_INSTRUCTIONS, system_instructions)
         if metadata:
             self._writer.apply_metadata(metadata)
         if level:
             self._otel_span.set_attribute(ATTR.OBSERVATION_LEVEL, level)
-        self._writer.set_masked_string(ATTR.STATUS_MESSAGE, status_message)
-        self._writer.set_masked_string(ATTR.VERSION, version)
+        self._writer.set_string(ATTR.STATUS_MESSAGE, status_message)
+        self._writer.set_string(ATTR.VERSION, version)
         self._set_tool_attrs(tool_name, tool_call_id, tool_arguments)
         return self
 
@@ -503,15 +477,13 @@ class Span(ActiveChildHost):
 
         if output is not None:
             self._writer.set_io(ATTR.OBSERVATION_OUTPUT, output)
-        self._writer.set_masked_json(GEN_AI.OUTPUT_MESSAGES, output_messages)
-        masked_status = self._writer.mask_string(status_message) if status_message else None
-        if masked_status is not None:
-            self._otel_span.set_attribute(ATTR.STATUS_MESSAGE, masked_status)
+        self._writer.set_json(GEN_AI.OUTPUT_MESSAGES, output_messages)
+        self._writer.set_string(ATTR.STATUS_MESSAGE, status_message)
         if level:
             self._otel_span.set_attribute(ATTR.OBSERVATION_LEVEL, level)
 
         if level == "ERROR":
-            self._otel_span.set_status(Status(StatusCode.ERROR, masked_status))
+            self._otel_span.set_status(Status(StatusCode.ERROR, status_message or None))
         else:
             self._otel_span.set_status(Status(StatusCode.OK))
 
@@ -521,8 +493,8 @@ class Span(ActiveChildHost):
     def _set_tool_attrs(
         self, tool_name: Optional[str], tool_call_id: Optional[str], tool_arguments: Any
     ) -> None:
-        self._writer.set_masked_string(GEN_AI.TOOL_NAME, tool_name)
-        self._writer.set_masked_string(GEN_AI.TOOL_CALL_ID, tool_call_id)
+        self._writer.set_string(GEN_AI.TOOL_NAME, tool_name)
+        self._writer.set_string(GEN_AI.TOOL_CALL_ID, tool_call_id)
         if tool_arguments is not None:
             self._writer.set_io(GEN_AI.TOOL_CALL_ARGUMENTS, tool_arguments)
 
@@ -544,7 +516,7 @@ class Span(ActiveChildHost):
         if t.user_email:
             self._otel_span.set_attribute(ATTR.USER_EMAIL, t.user_email)
         if t.name:
-            self._otel_span.set_attribute(ATTR.TRACE_NAME, t.mask_name(t.name))
+            self._otel_span.set_attribute(ATTR.TRACE_NAME, t.name)
 
 
 class Generation(Span):
@@ -667,9 +639,7 @@ class Generation(Span):
         once."""
         if model:
             self._set_model(model)
-        # Walk modelParameters: operators sometimes tuck provider keys or webhook
-        # URLs in here for custom backends.
-        self._writer.set_masked_json(ATTR.MODEL_PARAMETERS, model_parameters)
+        self._writer.set_json(ATTR.MODEL_PARAMETERS, model_parameters)
         if usage:
             self._set_usage(usage)
         if cost:
@@ -679,8 +649,8 @@ class Generation(Span):
                 ATTR.COMPLETION_START_TIME,
                 int(math.floor(completion_start_time * 1e9)),
             )
-        self._writer.set_masked_string(ATTR.PROMPT_NAME, prompt_name)
-        self._writer.set_masked_string(ATTR.PROMPT_VERSION, prompt_version)
+        self._writer.set_string(ATTR.PROMPT_NAME, prompt_name)
+        self._writer.set_string(ATTR.PROMPT_VERSION, prompt_version)
 
     def _set_model(self, model: str) -> None:
         self._otel_span.set_attribute(ATTR.MODEL_NAME, model)

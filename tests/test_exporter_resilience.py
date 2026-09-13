@@ -42,7 +42,7 @@ class _Resp:
 
 
 def _make_span(tracer, **routing) -> None:
-    t = Trace(tracer, name="s", sanitizer=None, **routing)
+    t = Trace(tracer, name="s", **routing)
     t.end()
 
 

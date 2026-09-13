@@ -21,7 +21,6 @@ def _trace(mem, **kwargs):
     kwargs.setdefault("tenant_id", "t1")
     kwargs.setdefault("workspace_id", "ws1")
     kwargs.setdefault("application_id", "app1")
-    kwargs.setdefault("sanitizer", mem.sanitizer)
     return Trace(mem.tracer, **kwargs)
 
 
@@ -122,9 +121,9 @@ def test_attribute_regression_unchanged_by_refactor(mem):
     assert json.loads(a[GEN_AI.OUTPUT_MESSAGES])[0]["content"] == "hello"
 
 
-def test_metadata_and_masking_regression(mem):
-    """Metadata fan-out + IO masking go through the shared writer; verify keys
-    and masking are byte-identical to the pre-refactor behavior."""
+def test_metadata_and_io_regression(mem):
+    """Metadata fan-out + IO go through the shared writer; verify keys and
+    values are byte-identical to the pre-refactor behavior."""
     t = _trace(mem)
     with t.span(
         "work",
@@ -140,5 +139,4 @@ def test_metadata_and_masking_regression(mem):
     assert a[ATTR.METADATA_PREFIX + "score"] == pytest.approx(0.9)
     assert a[ATTR.METADATA_PREFIX + "passed"] is True
     assert a[ATTR.METADATA_PREFIX + "label"] == "x"
-    assert "[EMAIL]" in a[ATTR.OBSERVATION_INPUT]
-    assert "a@b.com" not in a[ATTR.OBSERVATION_INPUT]
+    assert a[ATTR.OBSERVATION_INPUT] == "my email is a@b.com"

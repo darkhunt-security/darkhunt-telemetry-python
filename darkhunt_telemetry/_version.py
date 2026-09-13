@@ -10,4 +10,4 @@ Release model is "main = release": on every push to main, CI publishes
 value here is just a local-dev placeholder.
 """
 
-__version__ = "0.5.5"
+__version__ = "1.0.0"

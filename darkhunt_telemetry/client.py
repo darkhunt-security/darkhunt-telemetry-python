@@ -11,7 +11,6 @@ from __future__ import annotations
 import atexit
 import os
 import warnings
-from dataclasses import dataclass, field
 from typing import Any, Callable, Optional, Sequence, Set
 
 from opentelemetry.sdk.resources import SERVICE_NAME, SERVICE_VERSION, Resource
@@ -21,7 +20,6 @@ from opentelemetry.trace import Tracer
 
 from ._version import __version__ as LIB_VERSION
 from .exporter import DarkhuntSpanExporter, ExporterStats, TelemetryEvent
-from .masking import CustomPattern, Sanitizer
 from .otel_globals import register_otel_context_globals
 from .trace import Trace
 
@@ -48,20 +46,6 @@ def _atexit_handler() -> None:
             dh.shutdown()
         except Exception:  # nosec B110 - shutdown already swallows  # pragma: no cover
             pass
-
-
-@dataclass
-class MaskingOptions:
-    """Client-side data masking configuration.
-
-    - ``enabled``: mask inputs/outputs/messages/system prompts/metadata/status
-      messages before they leave the process. Defaults True.
-    - ``custom_patterns``: operator-defined extra rules merged after the bundled
-      defaults (site-specific patterns like internal ticket IDs).
-    """
-
-    enabled: bool = True
-    custom_patterns: Sequence[CustomPattern] = field(default_factory=list)
 
 
 def _env(name: str) -> Optional[str]:
@@ -106,7 +90,6 @@ class DarkhuntTelemetry:
         environment: Optional[str] = None,
         enabled: Optional[bool] = None,
         internal: Optional[bool] = None,
-        mask: Optional[MaskingOptions] = None,
         register_context_manager: Optional[bool] = None,
         tenant_id: Optional[str] = None,
         workspace_id: Optional[str] = None,
@@ -147,12 +130,6 @@ class DarkhuntTelemetry:
                 "DarkhuntTelemetry: api_key is required for the public endpoint "
                 "(pass via options, set DARKHUNT_API_KEY, or use internal=True)"
             )
-
-        masking_enabled = mask.enabled if mask is not None else True
-        self._sanitizer: Optional[Sanitizer] = None
-        if self._enabled and masking_enabled:
-            custom = list(mask.custom_patterns) if mask is not None else []
-            self._sanitizer = Sanitizer(custom_patterns=custom)
 
         # ``or`` (not a None-check) so an empty-string env var falls through to
         # the next source instead of producing an empty service.name.
@@ -260,7 +237,7 @@ class DarkhuntTelemetry:
 
         Use a small, stable set of values (``"research"``, ``"deal-scoring"``) — never
         a request id or anything derived from user input. Each distinct value is a
-        permanent node in the topology. Sent verbatim: not masked.
+        permanent node in the topology.
 
         Leave unset for a single-agent process and configure ``service_name`` on the
         client instead.
@@ -308,7 +285,6 @@ class DarkhuntTelemetry:
             input=input,
             output=output,
             start_time=start_time,
-            sanitizer=self._sanitizer,
         )
 
     def flush(self) -> bool:
@@ -385,4 +361,4 @@ def _require_field(value: Optional[str], option_name: str, env_var: str) -> None
         )
 
 
-__all__ = ["DarkhuntTelemetry", "MaskingOptions", "TelemetryEvent", "ExporterStats"]
+__all__ = ["DarkhuntTelemetry", "TelemetryEvent", "ExporterStats"]

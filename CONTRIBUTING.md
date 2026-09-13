@@ -9,7 +9,7 @@ Uses [uv](https://docs.astral.sh/uv/) for a fast, reproducible dev environment.
 ```bash
 git clone https://github.com/darkhunt-security/darkhunt-telemetry-python
 cd darkhunt-telemetry-python
-uv sync --all-extras     # create .venv from uv.lock (dev + temporal + crypto)
+uv sync --all-extras     # create .venv from uv.lock (dev + temporal)
 uv run mypy
 uv run pytest
 ```
@@ -22,7 +22,7 @@ That's the full local loop. If those pass, your environment is set up. Plain
 | Welcome                                                                    | Out of scope                                                                                       |
 | ------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------- |
 | Bug fixes with a regression test                                          | Reformatting / re-styling unrelated code (use a separate PR)                                        |
-| New validators in `darkhunt_telemetry/masking/validators/` (one pure function per file, positive + negative tests) | New backends — the SDK speaks vanilla OTLP; backend-specific extensions belong in adapter packages |
+| Test coverage improvements                                                | New backends — the SDK speaks vanilla OTLP; backend-specific extensions belong in adapter packages |
 | Documentation improvements                                                | Sweeping refactors without a discussed motivation — file an issue first                            |
 | Performance fixes with before/after measurements                          | Adding heavyweight runtime dependencies (each new dep affects every consumer)                       |
 | Improvements to the multi-agent / transport helpers                       | Removing tests to make CI green                                                                     |
@@ -34,7 +34,7 @@ For anything non-trivial, **open an issue first** to discuss the approach. Saves
 This SDK is the Python analog of [`@darkhunt-security/telemetry`](https://github.com/darkhunt-security/darkhunt-telemetry-ts) (TypeScript). Both must stay wire-compatible:
 
 - **Attribute keys** (`darkhunt_telemetry/attributes.py`) are the wire contract read by trace-hub. Do not change them without changing the TS SDK and the backend in lockstep.
-- **The masking ruleset** (`darkhunt_telemetry/masking/rules/rules.json`) is **mirrored from the TS SDK**, which is the source of truth. New masking rules land in the TS repo's YAML first, then the regenerated `rules.json` is synced here. A parity test (`tests/test_masking_parity.py`) guards ECMAScript regex semantics (`re.ASCII`).
+- **No client-side data masking.** Values are written to spans verbatim; PII masking happens server-side in the Darkhunt platform on ingest. Do not add masking to the SDK.
 
 ## Pull request checklist
 
@@ -54,7 +54,6 @@ Your PR template (`.github/PULL_REQUEST_TEMPLATE.md`) has the full checklist.
 
 - **Typed public API** — the package ships `py.typed`; keep everything annotated and mypy-clean. No bare `Any` without a comment explaining why.
 - **Comments say _why_, not _what_** — the code says what.
-- **One validator per file** under `darkhunt_telemetry/masking/validators/`, a pure function, with positive + negative test cases in `tests/`.
 - **Python 3.9 floor** — annotations are stringized via `from __future__ import annotations`; avoid PEP 604 unions (`X | Y`) in any annotation a runtime library will evaluate (e.g. Temporal `@activity.defn` calls `get_type_hints`). Use `Optional[X]`.
 - **No emojis in source files or commit messages** unless the situation genuinely calls for one.
 

@@ -16,7 +16,6 @@ from opentelemetry import trace as trace_api
 from opentelemetry.context import Context
 
 from .attributes import ATTR
-from .masking import Sanitizer
 from .span import (
     ActiveChildHost,
     AttributeWriter,
@@ -69,10 +68,8 @@ class Trace(ActiveChildHost):
         input: Any = None,
         output: Any = None,
         start_time: Optional[float] = None,
-        sanitizer: Optional[Sanitizer] = None,
     ) -> None:
         self._tracer_obj = tracer
-        self._sanitizer = sanitizer
         self._name = name
         # Routing fields are validated upstream by DarkhuntTelemetry.trace().
         self._tenant_id = tenant_id or ""
@@ -117,13 +114,13 @@ class Trace(ActiveChildHost):
         else:
             parent_context = handoff_contexts[0] if handoff_contexts else context_api.get_current()
         self._root_span = tracer.start_span(
-            self.mask_name(name or "trace"),
+            name or "trace",
             context=parent_context,
             links=root_links or None,
             start_time=_to_nanos(start_time),
         )
         self._root_context = trace_api.set_span_in_context(self._root_span, parent_context)
-        self._writer = AttributeWriter(self._root_span, self._sanitizer)
+        self._writer = AttributeWriter(self._root_span)
         self._apply_trace_attrs()
 
     # --- ActiveChildHost wiring ---
@@ -138,13 +135,6 @@ class Trace(ActiveChildHost):
     @property
     def _parent_context(self) -> Context:
         return self._root_context
-
-    # --- names / masking ---
-    def mask_name(self, name: str) -> str:
-        """Sanitize a span/trace name. Names land on the wire verbatim, so
-        user-controlled values can leak; identifying fields like ``user_id`` /
-        ``model`` are intentionally not masked, names are."""
-        return self._sanitizer.sanitize(name) if self._sanitizer is not None else name
 
     # --- accessors ---
     @property
@@ -162,10 +152,6 @@ class Trace(ActiveChildHost):
         ``agent_handoff`` span link. The root span is always exported, so it
         resolves."""
         return span_context_to_token(self._root_span.get_span_context())
-
-    @property
-    def sanitizer(self) -> Optional[Sanitizer]:
-        return self._sanitizer
 
     @property
     def tenant_id(self) -> str:
@@ -289,7 +275,7 @@ class Trace(ActiveChildHost):
         span.set_attribute(ATTR.APPLICATION_ID, self._application_id)
         span.set_attribute(ATTR.ASSESSMENT_RUN_ID, self._assessment_run_id)
         if self._name:
-            span.set_attribute(ATTR.TRACE_NAME, self.mask_name(self._name))
+            span.set_attribute(ATTR.TRACE_NAME, self._name)
         if self._session_id:
             span.set_attribute(ATTR.SESSION_ID, self._session_id)
         if self._user_id:
@@ -297,11 +283,7 @@ class Trace(ActiveChildHost):
         if self._user_email:
             span.set_attribute(ATTR.USER_EMAIL, self._user_email)
         if self._tags:
-            if self._sanitizer is not None:
-                tags = [self._sanitizer.sanitize(t) for t in self._tags]
-            else:
-                tags = self._tags
-            span.set_attribute(ATTR.TRACE_TAGS, ",".join(tags))
+            span.set_attribute(ATTR.TRACE_TAGS, ",".join(self._tags))
         if self._release:
             span.set_attribute(ATTR.RELEASE, self._release)
         if self._environment:

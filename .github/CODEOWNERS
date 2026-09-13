@@ -12,11 +12,6 @@
 # Same owner today; the per-path entries make it easy to add a security
 # sub-team or specific maintainer later without editing the default rule.
 
-# Data masking is the security-relevant core of this SDK.
-/darkhunt_telemetry/masking/                @darkhunt-security/engineering
-/darkhunt_telemetry/masking/rules/          @darkhunt-security/engineering
-/darkhunt_telemetry/masking/validators/     @darkhunt-security/engineering
-
 # Exporter handles all outbound network + auth.
 /darkhunt_telemetry/exporter.py             @darkhunt-security/engineering
 

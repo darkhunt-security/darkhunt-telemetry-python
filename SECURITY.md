@@ -20,15 +20,12 @@ PGP key for sensitive reports: available on request.
 
 In scope:
 
-- The SDK code itself — data leaks, unsafe defaults, misuse of crypto primitives
-- The bundled masking ruleset (`darkhunt_telemetry/masking/rules/rules.json`) — false-negatives that fail to redact sensitive data the rule claims to cover
-- The validator implementations (Luhn, credit-card/IIN, ABA, IBAN mod-97, base58check, bech32, EIP-55) — incorrect validation that masks invalid inputs (false positives) or fails to mask valid inputs (false negatives)
-- The vendored Keccak-256 fallback (`darkhunt_telemetry/masking/validators/keccak.py`) — used by the EIP-55 validator when `pycryptodome` is absent
+- The SDK code itself — data leaks, unsafe defaults, credential handling in the exporter
 
 Out of scope:
 
-- Vulnerabilities in the upstream Darkhunt platform (trace-hub, attack-discovery, dashboards) — those have their own disclosure channel; email `security@darkhunt.ai` and we'll route appropriately
-- Vulnerabilities in third-party dependencies — report upstream first (`opentelemetry-*`, `requests`, `pycryptodome`, etc.); we'll ship a dep bump once they fix
+- Vulnerabilities in the upstream Darkhunt platform (trace-hub, attack-discovery, dashboards), including its server-side PII masking — those have their own disclosure channel; email `security@darkhunt.ai` and we'll route appropriately
+- Vulnerabilities in third-party dependencies — report upstream first (`opentelemetry-*`, `requests`, etc.); we'll ship a dep bump once they fix
 - Theoretical issues with no demonstrated exploit path
 - Best-practice suggestions without an associated security impact (file as a regular issue)
 

@@ -9,8 +9,6 @@ from opentelemetry.sdk.trace.export.in_memory_span_exporter import (
     InMemorySpanExporter,
 )
 
-from darkhunt_telemetry.masking import Sanitizer
-
 
 class _Mem:
     def __init__(self):
@@ -18,7 +16,6 @@ class _Mem:
         self.provider = TracerProvider()
         self.provider.add_span_processor(SimpleSpanProcessor(self.exporter))
         self.tracer = self.provider.get_tracer("test")
-        self.sanitizer = Sanitizer()
 
     def spans(self):
         return list(self.exporter.get_finished_spans())

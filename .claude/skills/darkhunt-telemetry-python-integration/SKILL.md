@@ -7,7 +7,7 @@ description: |
   trace + generation + span emission via the `with`-based active-context helpers,
   backdated `start_time`, graceful shutdown, routing-field discipline (tenant_id /
   workspace_id / application_id), creating an OBSERVABILITY application via the
-  Darkhunt MCP, in-cluster vs public ingest, the masking layer, and — the big part
+  Darkhunt MCP, in-cluster vs public ingest, and — the big part
   — multi-agent topology + agent handoffs across every Python transport (an
   in-process contextvars carrier, orchestrator-passed traces, a LangGraph state
   field, the HTTP `traceparent` header, a queue metadata field, and Temporal
@@ -21,8 +21,8 @@ description: |
 
 This skill walks through wiring `darkhunt-telemetry` (the **Python** SDK) into a
 Python service. It is the Python analog of the TypeScript
-`darkhunt-telemetry-integration` skill — same wire contract, same routing
-semantics, same masking ruleset, adapted to Python idioms (keyword arguments,
+`darkhunt-telemetry-integration` skill — same wire contract and routing
+semantics, adapted to Python idioms (keyword arguments,
 `with` context managers, `contextvars`).
 
 **The reference integration is `temporal-demo-python`** at
@@ -31,7 +31,7 @@ where each domain uses a *different* orchestration style, so it demonstrates eve
 handoff transport at once. Read it when in doubt; the patterns below are extracted
 from it. The SDK source lives at
 `/Users/sergey/proj/darkhunt/darkhunt-telemetry-python` and ships a `README.md`
-with the full API reference + masking docs — **read that README** for anything the
+with the full API reference — **read that README** for anything the
 patterns below don't cover.
 
 ## What the SDK is
@@ -41,8 +41,8 @@ A Darkhunt-specific span exporter built on OpenTelemetry primitives
 LLM generations, tool calls, retrievals, guardrails — to Darkhunt trace-hub.
 Routing semantics (`tenant_id` / `workspace_id` / `application_id`) and the
 attribute schema are Darkhunt-specific; trace-hub is the only intended receiver.
-Built-in client-side masking redacts 66 secret/PII patterns before payloads leave
-the process. Requires Python **3.9+**.
+The SDK sends values verbatim — PII masking happens server-side in the Darkhunt
+platform on ingest. Requires Python **3.9+**.
 
 Key shapes:
 
@@ -77,8 +77,8 @@ Leave the spec unpinned to track latest, or set a floor (`>=0.5.13`) / pin an
 exact version for reproducibility.
 
 **Extras:** `[temporal]` pulls in `temporalio` (only needed for the Temporal
-handoff interceptors); `[crypto]` adds the vetted Keccak validator. The core
-package imports neither, so it loads with zero Temporal/crypto packages installed.
+handoff interceptors). The core package does not import it, so it loads with zero
+Temporal packages installed.
 
 Because it installs from PyPI, **Docker builds just work** — `pip install` /
 `uv sync` pulls the wheel inside the image, with no build-context tricks.
@@ -277,9 +277,8 @@ omit for general production tracing.
 Technically optional, but **every integration should set them**. Traces sharing a
 `session_id` group into one conversation timeline; the policy engine keys per-user
 signals off `user_id`. If not known at open, `trace.update(user_id=..., session_id=...)`
-once they are — spans created after inherit the values. Routing identifiers are
-**not** masked (they round-trip verbatim for exact-match grouping) — hash any
-PII-bearing identifier caller-side.
+once they are — spans created after inherit the values. Routing identifiers
+round-trip verbatim for exact-match grouping.
 
 ## In-cluster vs public ingest
 
@@ -306,21 +305,11 @@ Every factory has a `start_active_*` variant. Spans nest naturally —
 (and optionally `tool_call_id` / `tool_arguments`) so the dashboard shows the real
 tool, not the generic type.
 
-## Masking (default-on)
+## Data masking
 
-66 secret/PII patterns are redacted from inputs/outputs/messages/system
-prompts/metadata/tool args before anything leaves the process. Add site patterns
-or disable for local synthetic-data dev:
-
-```python
-from darkhunt_telemetry import DarkhuntTelemetry, MaskingOptions
-from darkhunt_telemetry.masking import CustomPattern
-
-dh = DarkhuntTelemetry(
-    tenant_id="t", workspace_id="w", application_id="a",
-    mask=MaskingOptions(enabled=True, custom_patterns=[CustomPattern(regex=r"TICKET-\d+", marker="[TICKET]")]),
-)
-```
+There is no client-side masking and no `mask=` option: inputs/outputs/messages/system
+prompts/metadata/tool args are sent verbatim. PII masking happens server-side in the
+Darkhunt platform on ingest.
 
 ## Multi-agent topology & handoffs
 

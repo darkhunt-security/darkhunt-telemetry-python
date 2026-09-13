@@ -15,7 +15,6 @@ def _trace(mem, **kwargs):
     kwargs.setdefault("tenant_id", "t1")
     kwargs.setdefault("workspace_id", "ws1")
     kwargs.setdefault("application_id", "app1")
-    kwargs.setdefault("sanitizer", mem.sanitizer)
     return Trace(mem.tracer, **kwargs)
 
 
@@ -55,15 +54,45 @@ def test_generation_full_payload(mem):
     assert json.loads(a[GEN_AI.OUTPUT_MESSAGES])[0]["content"] == "hello"
 
 
-def test_masking_applied_to_io(mem):
-    t = _trace(mem)
-    g = t.generation("g")
-    g.update(input_messages=[{"role": "user", "content": "my email is a@b.com"}])
-    g.end()
+def test_content_written_verbatim(mem):
+    """The SDK does no client-side masking: every user-supplied value reaches the
+    wire exactly as given (PII masking happens server-side on ingest)."""
+    email = "a@b.com"
+    t = _trace(mem, name=f"trace {email}", tags=[f"tag {email}"], metadata={email: email})
+    g = t.generation(
+        f"gen {email}",
+        model_parameters={"note": email},
+        prompt_name=f"prompt {email}",
+    )
+    g.update(
+        input=f"in {email}",
+        input_messages=[{"role": "user", "content": f"my email is {email}"}],
+        system_instructions=f"sys {email}",
+        tool_name=f"tool {email}",
+        tool_arguments={"to": email},
+    )
+    g.end(
+        output_messages=[{"role": "assistant", "content": email}],
+        level="ERROR",
+        status_message=f"failed for {email}",
+    )
     t.end()
-    (span,) = mem.by_name("g")
-    assert "[EMAIL]" in span.attributes[GEN_AI.INPUT_MESSAGES]
-    assert "a@b.com" not in span.attributes[GEN_AI.INPUT_MESSAGES]
+    (gen,) = mem.by_name(f"gen {email}")
+    (root,) = mem.by_name(f"trace {email}")
+    a = gen.attributes
+    assert a[ATTR.OBSERVATION_INPUT] == f"in {email}"
+    assert json.loads(a[GEN_AI.INPUT_MESSAGES])[0]["content"] == f"my email is {email}"
+    assert json.loads(a[GEN_AI.OUTPUT_MESSAGES])[0]["content"] == email
+    assert a[GEN_AI.SYSTEM_INSTRUCTIONS] == f"sys {email}"
+    assert a[GEN_AI.TOOL_NAME] == f"tool {email}"
+    assert json.loads(a[GEN_AI.TOOL_CALL_ARGUMENTS]) == {"to": email}
+    assert json.loads(a[ATTR.MODEL_PARAMETERS]) == {"note": email}
+    assert a[ATTR.PROMPT_NAME] == f"prompt {email}"
+    assert a[ATTR.STATUS_MESSAGE] == f"failed for {email}"
+    assert gen.status.description == f"failed for {email}"
+    assert a[ATTR.TRACE_NAME] == f"trace {email}"
+    assert root.attributes[ATTR.TRACE_TAGS] == f"tag {email}"
+    assert root.attributes[ATTR.METADATA_PREFIX + email] == email
 
 
 def test_tool_span_attrs(mem):
@@ -176,12 +205,3 @@ def test_internal_endpoint_needs_no_api_key(monkeypatch):
     dh = DarkhuntTelemetry(internal=True, tenant_id="t", workspace_id="w", application_id="a")
     assert dh.enabled
     dh.shutdown()
-
-
-def test_masking_disabled_leaves_content_raw(mem):
-    t = _trace(mem, sanitizer=None)
-    g = t.generation("g")
-    g.end(output="email a@b.com")
-    t.end()
-    (span,) = mem.by_name("g")
-    assert span.attributes[ATTR.OBSERVATION_OUTPUT] == "email a@b.com"

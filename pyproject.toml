@@ -7,7 +7,7 @@ name = "darkhunt-telemetry"
 # Single source of truth: the version is read from darkhunt_telemetry/_version.py
 # by hatchling (see [tool.hatch.version] below). Bump that ONE file to release.
 dynamic = ["version"]
-description = "Python SDK for sending LLM traces, generations, and observations to the Darkhunt platform for persistence and security data enrichment. Built on OpenTelemetry primitives, with built-in client-side data masking."
+description = "Python SDK for sending LLM traces, generations, and observations to the Darkhunt platform for persistence and security data enrichment. Built on OpenTelemetry primitives."
 readme = "README.md"
 license = "Apache-2.0"
 requires-python = ">=3.9"
@@ -19,8 +19,6 @@ keywords = [
     "llm",
     "observability",
     "tracing",
-    "data-masking",
-    "pii",
 ]
 classifiers = [
     "Development Status :: 4 - Beta",
@@ -46,13 +44,9 @@ dependencies = [
 # Optional Temporal handoff propagation (interceptors). Install with
 #   pip install "darkhunt-telemetry[temporal]"
 temporal = ["temporalio>=1.4.0"]
-# Vetted-crypto path for the Keccak validator (lazy-imported).
-#   pip install "darkhunt-telemetry[crypto]"
-crypto = ["pycryptodome>=3.19"]
 # Development / test tooling.
 dev = [
     "pytest>=7.0",
-    "pyyaml>=6.0",
     "ruff>=0.6",
     "mypy>=1.8",
     "types-requests>=2.25",
@@ -72,7 +66,6 @@ path = "darkhunt_telemetry/_version.py"
 packages = ["darkhunt_telemetry"]
 
 [tool.hatch.build.targets.wheel.force-include]
-"darkhunt_telemetry/masking/rules/rules.json" = "darkhunt_telemetry/masking/rules/rules.json"
 "darkhunt_telemetry/py.typed" = "darkhunt_telemetry/py.typed"
 
 [tool.pytest.ini_options]

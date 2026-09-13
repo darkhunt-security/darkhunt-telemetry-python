@@ -15,7 +15,6 @@ def _trace(mem, **kwargs):
     kwargs.setdefault("tenant_id", "t1")
     kwargs.setdefault("workspace_id", "ws1")
     kwargs.setdefault("application_id", "app1")
-    kwargs.setdefault("sanitizer", mem.sanitizer)
     return Trace(mem.tracer, **kwargs)
 
 

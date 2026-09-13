@@ -1,8 +1,7 @@
 """Darkhunt telemetry SDK for Python.
 
 Send LLM traces, generations, and observations to the Darkhunt platform for
-persistence and security data enrichment. Built on OpenTelemetry primitives,
-with built-in client-side data masking.
+persistence and security data enrichment. Built on OpenTelemetry primitives.
 
 Quick start::
 
@@ -24,9 +23,8 @@ Quick start::
 from __future__ import annotations
 
 from ._version import __version__
-from .client import DarkhuntTelemetry, MaskingOptions
+from .client import DarkhuntTelemetry
 from .exporter import ExporterStats, TelemetryEvent, TelemetryEventHook
-from .masking import CustomPattern, Sanitizer
 from .otel_globals import register_otel_context_globals
 from .span import (
     Generation,
@@ -51,7 +49,6 @@ __all__ = [
     "__version__",
     # client
     "DarkhuntTelemetry",
-    "MaskingOptions",
     # delivery observability
     "TelemetryEvent",
     "TelemetryEventHook",
@@ -63,9 +60,6 @@ __all__ = [
     "HandoffToken",
     "span_context_to_token",
     "token_to_context",
-    # masking
-    "Sanitizer",
-    "CustomPattern",
     # otel
     "register_otel_context_globals",
     # types

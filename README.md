@@ -12,14 +12,12 @@
 
 Python SDK for sending LLM **traces**, **generations**, and **observations** to
 the Darkhunt platform for persistence and security data enrichment. Built on
-OpenTelemetry primitives (TracerProvider, BatchSpanProcessor, OTLP/protobuf),
-with built-in **client-side data masking** that redacts 66 secret/PII patterns
-before anything leaves your process.
+OpenTelemetry primitives (TracerProvider, BatchSpanProcessor, OTLP/protobuf).
 
 This is the Python analog of
 [`@darkhunt-security/telemetry`](https://github.com/darkhunt-security/darkhunt-telemetry-ts)
-(the TypeScript SDK) — same wire contract, same routing semantics, same masking
-ruleset, adapted to Python idioms (keyword arguments, `with` context managers).
+(the TypeScript SDK) — same wire contract and routing semantics, adapted to
+Python idioms (keyword arguments, `with` context managers).
 
 - **`DarkhuntTelemetry`** — the client. One per process.
 - **`Trace`** — a single user-facing interaction. Carries routing fields.
@@ -196,7 +194,6 @@ Every option resolves `constructor arg > env var > default`.
 | `flush_interval_ms`               | `DARKHUNT_FLUSH_INTERVAL` (seconds)           | `5` s                               |
 | `timeout_ms`                      | `DARKHUNT_TIMEOUT` (seconds)                  | `10` s                              |
 | `register_context_manager`        | `DARKHUNT_REGISTER_CONTEXT_MANAGER`           | `true`                              |
-| `mask`                            | —                                             | `MaskingOptions(enabled=True)`      |
 
 > **Two rules when overriding `base_url`:** use the **ingest API host**
 > (`api…darkhunt.ai`), not the dashboard, and **keep the `/trace-hub` path** —
@@ -211,32 +208,14 @@ raises `ValueError` if tenant/workspace/application is missing after merging.
 > nesting works with nothing to register. This option is kept for parity and
 > only ensures a global W3C propagator exists for `traceparent` inject/extract.
 
-## Data masking (default-on)
+## Data masking
 
-By default the SDK redacts 66 secret/PII patterns (API keys, tokens, emails,
-IBANs, credit cards — Luhn/IIN-validated — SSNs, crypto addresses, and more)
-from all inputs, outputs, messages, system prompts, metadata values, tool
-arguments, and status messages before they leave the process. Same ruleset
-(`rules.json`) as the TypeScript SDK.
+The SDK does **not** mask data client-side: inputs, outputs, messages, system
+prompts, metadata, tool arguments, names, tags, and status messages are sent
+verbatim. PII masking happens server-side in the Darkhunt platform on ingest.
 
-Routing identifiers (`session_id`, `user_id`, `user_email`) are **not** masked —
-they round-trip verbatim so the dashboard can group and filter by exact match.
-Hash any PII-bearing identifier caller-side before passing it.
-
-Add site-specific patterns, or disable masking for local dev with synthetic data:
-
-```python
-from darkhunt_telemetry import DarkhuntTelemetry, MaskingOptions
-from darkhunt_telemetry.masking import CustomPattern
-
-dh = DarkhuntTelemetry(
-    tenant_id="t", workspace_id="w", application_id="a",
-    mask=MaskingOptions(
-        enabled=True,
-        custom_patterns=[CustomPattern(regex=r"TICKET-\d+", marker="[TICKET]")],
-    ),
-)
-```
+Routing identifiers (`session_id`, `user_id`, `user_email`) round-trip verbatim
+so the dashboard can group and filter by exact match.
 
 ## Multi-agent topology (agent handoffs)
 
@@ -371,7 +350,7 @@ Uses [uv](https://docs.astral.sh/uv/) for a fast, reproducible dev environment
 (pinned by `uv.lock`); the build backend is hatchling.
 
 ```bash
-uv sync --all-extras          # create .venv from the lockfile (dev + temporal + crypto)
+uv sync --all-extras          # create .venv from the lockfile (dev + temporal)
 uv run pytest                 # tests
 uv run ruff check . && uv run ruff format --check .
 uv run mypy

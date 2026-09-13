@@ -15,6 +15,25 @@ published patch.
 
 ## [Unreleased]
 
+### Removed
+
+- **BREAKING — client-side data masking is gone; starts the `1.0` series.** PII
+  masking now happens server-side in the Darkhunt platform on ingest, so the SDK
+  sends every value (inputs, outputs, messages, system instructions, names, tags,
+  metadata keys and values, tool fields, status messages) verbatim. Removed from the
+  public API, with no deprecation shim:
+  - the `mask=` argument on `DarkhuntTelemetry` and the `MaskingOptions` class;
+  - `Sanitizer` and `CustomPattern` (top-level exports) and the whole
+    `darkhunt_telemetry.masking` package, including its validators and bundled
+    `rules.json`. Per-client custom patterns have no replacement;
+  - the `sanitizer=` argument and `sanitizer` property on `Trace`, and
+    `Trace.mask_name()`;
+  - the `crypto` extra (`pycryptodome`), which only served a masking validator.
+
+  Migration: drop any `mask=` / `MaskingOptions` / `CustomPattern` usage.
+  `safe_json_dumps` moved from `darkhunt_telemetry.masking` to
+  `darkhunt_telemetry.serialization`.
+
 ### Added
 
 - **Per-trace agent identity (`agent`).** New `agent` argument on `dh.trace(...)`
