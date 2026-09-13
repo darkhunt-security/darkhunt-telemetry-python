@@ -339,7 +339,8 @@ tool, not the generic type.
 
 There is no client-side masking and no `mask=` option: inputs/outputs/messages/system
 prompts/metadata/tool args are sent verbatim. PII masking happens server-side in the
-Darkhunt platform on ingest.
+Darkhunt platform on ingest, but it does **not** cover metadata values, tags or routing
+IDs (`session_id`, `user_id`, `user_email`) — never put secrets or unhashed PII there.
 
 ## Multi-agent topology & handoffs
 
