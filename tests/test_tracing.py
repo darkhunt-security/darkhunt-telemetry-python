@@ -205,3 +205,46 @@ def test_internal_endpoint_needs_no_api_key(monkeypatch):
     dh = DarkhuntTelemetry(internal=True, tenant_id="t", workspace_id="w", application_id="a")
     assert dh.enabled
     dh.shutdown()
+
+
+def test_trace_context_is_on_every_span(mem):
+    """Tags, release, environment and trace metadata reach child spans, not only the
+    root: the root ends last, so it is usually exported in a later batch than its
+    children, and a root-only value never reaches them on the backend."""
+    t = _trace(
+        mem,
+        name="draft",
+        tags=["sales", "outbound"],
+        release="guidance-v7",
+        environment="production",
+        metadata={"run_id": "r-1", "shared": "trace"},
+    )
+    s = t.span("step", metadata={"shared": "span"})
+    g = s.generation("answer", model="claude-sonnet-5")
+    g.end()
+    s.end()
+    t.end()
+    for name in ("step", "answer"):
+        (span,) = mem.by_name(name)
+        a = span.attributes
+        assert a[ATTR.TRACE_TAGS] == "sales,outbound"
+        assert a[ATTR.RELEASE] == "guidance-v7"
+        assert a[ATTR.ENVIRONMENT] == "production"
+        assert a[f"{ATTR.METADATA_PREFIX}run_id"] == "r-1"
+    # The span's own metadata wins on a shared key.
+    (step,) = mem.by_name("step")
+    assert step.attributes[f"{ATTR.METADATA_PREFIX}shared"] == "span"
+    (answer,) = mem.by_name("answer")
+    assert answer.attributes[f"{ATTR.METADATA_PREFIX}shared"] == "trace"
+
+
+def test_no_trace_context_adds_nothing(mem):
+    t = _trace(mem, name="bare")
+    s = t.span("step")
+    s.end()
+    t.end()
+    (span,) = mem.by_name("step")
+    a = span.attributes
+    for key in (ATTR.TRACE_TAGS, ATTR.RELEASE, ATTR.ENVIRONMENT):
+        assert key not in a
+    assert not any(k.startswith(ATTR.METADATA_PREFIX) for k in a)

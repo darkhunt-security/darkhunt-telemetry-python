@@ -15,6 +15,13 @@ published patch.
 
 ## [Unreleased]
 
+### Changed
+
+- **Trace tags, release, environment and metadata are now set on every span**, not
+  only the trace root. The root span ends last, so it is usually exported in a later
+  batch than its children, and a root-only value never reached them on the backend.
+  A span's own metadata still wins on a key the trace also sets.
+
 ### Removed
 
 - **BREAKING — client-side data masking is gone; starts the `1.0` series.** PII

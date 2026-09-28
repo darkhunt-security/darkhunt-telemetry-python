@@ -517,6 +517,18 @@ class Span(ActiveChildHost):
             self._otel_span.set_attribute(ATTR.USER_EMAIL, t.user_email)
         if t.name:
             self._otel_span.set_attribute(ATTR.TRACE_NAME, t.name)
+        # Trace-level context, also on every span. The root span is exported last — it ends
+        # after its children — so children usually reach the backend in an earlier batch than
+        # the root, and a root-only value never reaches them. Trace metadata goes first so the
+        # span's own metadata, applied after this, wins on a shared key.
+        if t._tags:
+            self._otel_span.set_attribute(ATTR.TRACE_TAGS, ",".join(t._tags))
+        if t._release:
+            self._otel_span.set_attribute(ATTR.RELEASE, t._release)
+        if t._environment:
+            self._otel_span.set_attribute(ATTR.ENVIRONMENT, t._environment)
+        if t._metadata:
+            self._writer.apply_metadata(t._metadata)
 
 
 class Generation(Span):
