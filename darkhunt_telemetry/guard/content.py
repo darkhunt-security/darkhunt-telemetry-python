@@ -69,17 +69,16 @@ def _check(
         "stage": stage,
         "workspaceId": getattr(trace, "workspace_id", None) or cfg.workspace_id,
         "applicationId": getattr(trace, "application_id", None) or cfg.application_id,
-        "sessionId": session_id or getattr(trace, "session_id", None),
+        "sessionId": getattr(trace, "session_id", None) or session_id,
         "userId": getattr(trace, "user_id", None),
         "userEmail": getattr(trace, "user_email", None),
         "source": cfg.source or getattr(trace, "agent", None) or _service_name(trace),
-        "messages": _messages(content, role, cfg.max_result_bytes),
     }
     body = {k: v for k, v in body.items() if v}
+    # Kept even when empty: /verify then answers (or rejects) the request itself.
+    body["messages"] = messages = _messages(content, role, cfg.max_result_bytes)
     g = (
-        host.span(
-            f"darkhunt.guard.{stage.lower()}", observation_type="guardrail", input=body["messages"]
-        )
+        host.span(f"darkhunt.guard.{stage.lower()}", observation_type="guardrail", input=messages)
         if host is not None
         else None
     )
@@ -109,8 +108,8 @@ def check_input(
 
     ``content`` is the request text, or a list of ``{"role", "content"}``
     messages when context matters. Routing and the session come from the current
-    trace; ``session_id`` sets the session when there is none (a gateway checking
-    a run it has already handed off). Act on ``verdict.blocked``.
+    trace; ``session_id`` is used when the trace has none, or there is no trace (a
+    gateway checking a run it has already handed off). Act on ``verdict.blocked``.
     """
     return _check("INPUT", content, "user", config, session_id)
 

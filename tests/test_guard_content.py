@@ -57,6 +57,20 @@ def test_a_session_can_be_given_when_there_is_no_trace(verify):
     assert body["sessionId"] == "task-42" and body["applicationId"] == "app9"
 
 
+def test_the_traces_session_wins_over_a_given_one(mem, verify):
+    _configure(verify)
+    with _trace(mem, session_id="task-9").activate():
+        check_input(REQUEST, session_id="other")
+    assert verify.requests[0]["body"]["sessionId"] == "task-9"
+
+
+def test_an_empty_message_list_is_still_sent(mem, verify):
+    _configure(verify)
+    with _trace(mem).activate():
+        v = check_input([])
+    assert verify.requests[0]["body"]["messages"] == [] and v.decision == "ALLOW"
+
+
 def test_the_answer_is_sent_as_an_assistant_message(mem, verify):
     _configure(verify)
     with _trace(mem).activate():
