@@ -26,6 +26,9 @@ Python idioms (keyword arguments, `with` context managers).
 - **`@guard`** — asks Darkhunt before a tool runs and before its output is used,
   so dashboard rules can block it ([Guard tool calls](#guard-tool-calls-guard);
   optionally [through Microsoft AGT](#microsoft-agent-governance-toolkit-optional-experimental)).
+- **`check_input` / `check_output`** — the same check for the request before the
+  agent sees it and the answer before the user does
+  ([Guard the request and the answer](#guard-the-request-and-the-answer)).
 
 Requires Python **3.9+**.
 
@@ -412,6 +415,35 @@ Notes:
   current without ending it. Outside a trace the checks still run on the
   configured routing, but carry no session.
 - **Generators are refused.** Streaming tools cannot be guarded yet.
+
+## Guard the request and the answer
+
+`check_input` sends the request to `/verify` at the `INPUT` stage before the agent
+sees it, and `check_output` sends the answer at `OUTPUT` before the user does. They
+use the same configuration as `@guard`: mode, fail mode, routing, `on_verdict`, and
+a `guardrail` span under the current trace. Stopping the work is up to you, since
+only your code knows what "don't run the agent" or "don't show the answer" means:
+
+```python
+from darkhunt_telemetry.guard import check_input, check_output, refusal
+
+with trace.activate():
+    verdict = check_input(request)
+    if verdict.blocked:
+        return refusal(verdict)  # "Blocked by Darkhunt: <rule>. The request was not processed."
+    answer = run_agent(request)
+    verdict = check_output(answer)
+    return refusal(verdict) if verdict.blocked else answer
+```
+
+- **Pass messages for context:** `check_input([{"role": "system", "content": ...}, {"role": "user", "content": ...}])`.
+  A plain string is sent as one `user` (input) or `assistant` (output) message.
+- **Async:** `await acheck_input(...)` / `await acheck_output(...)`.
+- **Budget:** content is classified by a model, so these checks use
+  `result_timeout_s`, not the tighter `call_timeout_s`. Text over
+  `max_result_bytes` is sent truncated.
+- **Act on `verdict.blocked`,** as with tools: a DENY in `shadow` mode is
+  `denied` but not `blocked`.
 
 ## Microsoft Agent Governance Toolkit (optional, experimental)
 

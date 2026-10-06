@@ -40,7 +40,7 @@ from .._current import current_observation
 from ..serialization import safe_json_dumps
 from .client import VerifyClient
 from .config import GuardConfig, get_config
-from .verdict import DarkhuntBlocked, Verdict
+from .verdict import DarkhuntBlocked, Verdict, refusal
 
 OnDeny = Union[str, Callable[[Verdict], Any]]
 
@@ -129,6 +129,15 @@ def record_verdict(g: Any, span: Any, v: Verdict) -> None:
         )
 
 
+def blocks(cfg: GuardConfig, v: Verdict) -> bool:
+    """Whether ``v`` stops the step under ``cfg``'s mode and fail mode."""
+    if cfg.mode != "enforce":
+        return False
+    if v.unanswered:
+        return cfg.fail == "closed"
+    return v.denied
+
+
 class _Guarded:
     def __init__(
         self,
@@ -210,13 +219,6 @@ class _Guarded:
         }
         return tenant, {k: v for k, v in body.items() if v}
 
-    def blocks(self, cfg: GuardConfig, v: Verdict) -> bool:
-        if cfg.mode != "enforce":
-            return False
-        if v.unanswered:
-            return cfg.fail == "closed"
-        return v.denied
-
     def check(
         self,
         cfg: GuardConfig,
@@ -248,7 +250,7 @@ class _Guarded:
         else:
             timeout = cfg.call_timeout_s if stage == "TOOL_CALL" else cfg.result_timeout_s
             v = _client.verify(cfg, tenant_id=tenant, body=body, timeout_s=timeout)
-        v = replace(v, mode=cfg.mode, blocked=self.blocks(cfg, v), session_id=body.get("sessionId"))
+        v = replace(v, mode=cfg.mode, blocked=blocks(cfg, v), session_id=body.get("sessionId"))
         self.record(g, span, v)
         if cfg.on_verdict is not None:
             try:
@@ -263,15 +265,7 @@ class _Guarded:
     def refuse(self, v: Verdict, span: Any, opened: bool) -> Any:
         if self.on_deny == "raise":
             raise DarkhuntBlocked(v)
-        if callable(self.on_deny):
-            value = self.on_deny(v)
-        elif v.stage == "TOOL_CALL":
-            value = f"Blocked by Darkhunt: {v.reason}. The {self.name} tool was not run."
-        else:
-            value = (
-                f"Withheld by Darkhunt: {v.reason}. "
-                f"The {self.name} tool ran, but its output was withheld."
-            )
+        value = self.on_deny(v) if callable(self.on_deny) else refusal(v)
         if opened:
             span.update(output=value)
         return value

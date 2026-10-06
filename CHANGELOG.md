@@ -27,6 +27,11 @@ published patch.
     `DarkhuntBlocked`, or call your own function.
   - **Recording:** each check is a `guardrail` span under the tool's span.
   - **Configuration:** `configure_guard()` or `DARKHUNT_GUARD_*`.
+- **`check_input` / `check_output`** (and async `acheck_input` / `acheck_output`)
+  check the request (`INPUT`) before the agent sees it and the answer (`OUTPUT`)
+  before the user does, with `@guard`'s configuration and `guardrail` spans. The
+  caller acts on `verdict.blocked`; `refusal(verdict)` gives the text to show
+  instead. `refusal` and `DarkhuntBlocked` now name all four stages.
 - **`Trace.activate()`** makes a trace the current run for a block of code
   without ending it, and **`current_observation()`** returns that run. The
   `start_active_*` helpers now also set the current observation.
