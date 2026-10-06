@@ -5,7 +5,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Optional, Tuple
 
-Stage = str  # "TOOL_CALL" | "TOOL_RESULT"
+Stage = str  # "INPUT" | "TOOL_CALL" | "TOOL_RESULT" | "OUTPUT"
 
 
 @dataclass(frozen=True)
@@ -57,10 +57,28 @@ class Verdict:
         return ""
 
 
+def refusal(verdict: Verdict) -> str:
+    """What to show in place of whatever ``verdict`` blocked."""
+    if verdict.stage == "INPUT":
+        return f"Blocked by Darkhunt: {verdict.reason}. The request was not processed."
+    if verdict.stage == "OUTPUT":
+        return f"Withheld by Darkhunt: {verdict.reason}. The answer was not shown."
+    if verdict.stage == "TOOL_CALL":
+        return f"Blocked by Darkhunt: {verdict.reason}. The {verdict.tool} tool was not run."
+    return (
+        f"Withheld by Darkhunt: {verdict.reason}. "
+        f"The {verdict.tool} tool ran, but its output was withheld."
+    )
+
+
 class DarkhuntBlocked(Exception):
     """Raised by a guarded tool declared with ``on_deny="raise"``."""
 
     def __init__(self, verdict: Verdict) -> None:
         self.verdict = verdict
-        where = "before it ran" if verdict.stage == "TOOL_CALL" else "after it ran; output withheld"
-        super().__init__(f"{verdict.tool} blocked by Darkhunt {where}: {verdict.reason}")
+        what = {
+            "INPUT": "the request was blocked by Darkhunt",
+            "OUTPUT": "the answer was withheld by Darkhunt",
+            "TOOL_CALL": f"{verdict.tool} blocked by Darkhunt before it ran",
+        }.get(verdict.stage, f"{verdict.tool} blocked by Darkhunt after it ran; output withheld")
+        super().__init__(f"{what}: {verdict.reason}")

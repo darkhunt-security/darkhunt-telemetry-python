@@ -53,7 +53,7 @@ class _Verify:
                     {"path": self.path, "headers": dict(self.headers), "body": body}
                 )
                 answer = stub.rules.get(
-                    (body["stage"], body["tool"]["name"]), {"decision": "ALLOW"}
+                    (body["stage"], (body.get("tool") or {}).get("name", "")), {"decision": "ALLOW"}
                 )
                 payload = json.dumps({"stage": body["stage"], "failed": False, **answer}).encode()
                 self.send_response(200)
@@ -76,7 +76,10 @@ class _Verify:
         }
 
     def stages(self):
-        return [(r["body"]["stage"], r["body"]["tool"]["name"]) for r in self.requests]
+        return [
+            (r["body"]["stage"], (r["body"].get("tool") or {}).get("name", ""))
+            for r in self.requests
+        ]
 
 
 @pytest.fixture
