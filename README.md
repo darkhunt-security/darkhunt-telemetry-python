@@ -440,8 +440,10 @@ with trace.activate():
   A plain string is sent as one `user` (input) or `assistant` (output) message.
 - **Async:** `await acheck_input(...)` / `await acheck_output(...)`.
 - **Budget:** content is classified by a model, so these checks use
-  `result_timeout_s`, not the tighter `call_timeout_s`. Text over
-  `max_result_bytes` is sent truncated.
+  `result_timeout_s`, not the tighter `call_timeout_s`.
+- **Size:** only the first `max_result_bytes` of each message are sent, as with a
+  tool result; anything after that is not checked. Raise the cap
+  (`DARKHUNT_GUARD_MAX_RESULT`) if your requests or answers can be longer.
 - **Act on `verdict.blocked`,** as with tools: a DENY in `shadow` mode is
   `denied` but not `blocked`.
 
