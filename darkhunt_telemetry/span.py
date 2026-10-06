@@ -31,6 +31,7 @@ from opentelemetry.trace import (
 )
 from opentelemetry.trace.propagation.tracecontext import TraceContextTextMapPropagator
 
+from ._current import use_observation
 from .attributes import ATTR, GEN_AI
 from .serialization import safe_json_dumps
 from .types import ChatMessage, Cost, Metadata, ObservationLevel, ObservationType, Usage
@@ -288,13 +289,15 @@ class ActiveChildHost:
         """Open a child :class:`Span`, make it ACTIVE in the ambient OTel context
         for the duration of the ``with`` block, and end it on exit. Because the
         child is active, in-process spans opened without an explicit parent and
-        third-party OTel auto-instrumentation nest under it. On an exception the
+        third-party OTel auto-instrumentation nest under it, and it is the
+        :func:`~darkhunt_telemetry.current_observation` for the block. On an exception the
         child is marked ERROR and the exception re-raised. Idempotent end — a
         body that ends the span itself is fully supported."""
         span = self.span(name, **options)
         token = context_api.attach(span.context)
         try:
-            yield span
+            with use_observation(span):
+                yield span
         except BaseException as err:
             span.end(level="ERROR", status_message=str(err))
             raise
@@ -310,7 +313,8 @@ class ActiveChildHost:
         gen = self.generation(name, **options)
         token = context_api.attach(gen.context)
         try:
-            yield gen
+            with use_observation(gen):
+                yield gen
         except BaseException as err:
             gen.end(level="ERROR", status_message=str(err))
             raise
@@ -345,7 +349,9 @@ class Span(ActiveChildHost):
         self._ended = False
         self._writer = AttributeWriter(self._otel_span)
 
-        self._otel_span.set_attribute(ATTR.OBSERVATION_TYPE, opts.observation_type or "span")
+        self._observation_type = opts.observation_type or "span"
+        self._tool_name = opts.tool_name
+        self._otel_span.set_attribute(ATTR.OBSERVATION_TYPE, self._observation_type)
         self._apply_trace_attrs()
         if opts.input is not None:
             self._writer.set_io(ATTR.OBSERVATION_INPUT, opts.input)
@@ -384,6 +390,14 @@ class Span(ActiveChildHost):
     @property
     def otel_span(self) -> OtelSpan:
         return self._otel_span
+
+    @property
+    def observation_type(self) -> str:
+        return self._observation_type
+
+    @property
+    def tool_name(self) -> Optional[str]:
+        return self._tool_name
 
     def handoff_token(self) -> HandoffToken:
         """A serializable :data:`HandoffToken` for THIS span. Hand it to a
@@ -493,6 +507,8 @@ class Span(ActiveChildHost):
     def _set_tool_attrs(
         self, tool_name: Optional[str], tool_call_id: Optional[str], tool_arguments: Any
     ) -> None:
+        if tool_name is not None:
+            self._tool_name = tool_name
         self._writer.set_string(GEN_AI.TOOL_NAME, tool_name)
         self._writer.set_string(GEN_AI.TOOL_CALL_ID, tool_call_id)
         if tool_arguments is not None:

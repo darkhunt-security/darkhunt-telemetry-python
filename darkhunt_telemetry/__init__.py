@@ -22,6 +22,7 @@ Quick start::
 
 from __future__ import annotations
 
+from ._current import current_observation
 from ._version import __version__
 from .client import DarkhuntTelemetry
 from .exporter import ExporterStats, TelemetryEvent, TelemetryEventHook
@@ -60,6 +61,7 @@ __all__ = [
     "HandoffToken",
     "span_context_to_token",
     "token_to_context",
+    "current_observation",
     # otel
     "register_otel_context_globals",
     # types
