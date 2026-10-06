@@ -15,6 +15,10 @@ description: |
   to add LLM tracing/observability to a Python app, send spans to trace-hub, wire
   `DarkhuntTelemetry` / `client.trace()` / `trace.generation()`, or build a
   multi-agent Python system where agents hand off to each other (agent topology).
+  Also covers guarding tool calls with `@guard` (Darkhunt rules block a call before it
+  runs or withhold its output) and plugging Darkhunt in as the policy behind
+  Microsoft's Agent Governance Toolkit (AGT). Auto-invoke when the user asks to
+  guard, block or enforce policy on an agent's tool calls, or to integrate AGT.
 ---
 
 # Darkhunt telemetry Python SDK — integration guide
@@ -335,6 +339,99 @@ Every factory has a `start_active_*` variant. Spans nest naturally —
 (and optionally `tool_call_id` / `tool_arguments`) so the dashboard shows the real
 tool, not the generic type.
 
+## Guarding tool calls — `@guard` (enforcement, not just tracing)
+
+Tracing records what a tool did. `@guard` lets the **rules in the Darkhunt
+dashboard stop it**. It calls the guardrail manager's `/verify` twice per call:
+
+* **`TOOL_CALL`**, before the function runs: a block means it never runs;
+* **`TOOL_RESULT`**, before the caller sees the output: a block means it is withheld.
+
+Only add it when the user asks to guard, block or enforce. Plain observability
+doesn't need it.
+
+### Where it goes
+
+```python
+from darkhunt_telemetry.guard import configure_guard, guard
+
+configure_guard(mode="shadow")            # start in shadow; see "Rollout"
+
+@function_tool                            # the framework's decorator on TOP...
+@guard(name="send_referral")              # ...guard UNDER it (functools.wraps keeps the signature)
+def send_referral(to: str, subject: str, message: str) -> dict: ...
+```
+
+* **Wrap the function, not the framework.** Put `@guard` on each tool function,
+  under the framework's own decorator (`@function_tool`, `@tool`, `@mcp.tool()`).
+  A loop that dispatches by name can wrap its executor function instead.
+* **`name=` must match what the rules match on** (`toolName==…`). Default: the
+  function's name.
+* **Call tools inside the run.** Wrap the agent run in `with trace.activate():`
+  so each check carries the run's `session_id`, `user_id` and routing.
+  `activate()` makes the trace current without ending it. Outside a trace the
+  checks still run, but with no session, and the SDK warns once.
+* **Reuse an existing tool span.** If the code already opens a tool span for the
+  call (`start_active_span(name, observation_type="tool", tool_name=name)`), the
+  guard puts its `guardrail` spans under it instead of opening a second one.
+
+### Pick `on_deny` per tool, by who reads the result
+
+| Who consumes the result | `on_deny` | Why |
+| ----------------------- | --------- | --- |
+| **A model** (the LLM picked the tool) | `"return"` (default): a refusal string | the model reads "Blocked by Darkhunt: …" and can explain it |
+| **Code** that can do without the data | a callable, e.g. `lambda v: []` | the pipeline continues; the block is still recorded |
+| **Code** that can't continue | `"raise"`: `DarkhuntBlocked` | fail loudly rather than run on a refusal string |
+
+Never let a refusal *string* flow into code that expects a list or dict.
+
+### Rollout and verification
+
+1. **Start in `shadow`** (`DARKHUNT_GUARD_MODE=shadow`, the default). Checks run
+   and are recorded as "Would block (shadow)", but nothing is stopped.
+2. **Then `enforce` with an explicit fail mode.** `enforce` *requires*
+   `DARKHUNT_GUARD_FAIL=open|closed`, so nobody fails open or closed by accident.
+   Use `closed` for tools that send or write sensitive data, and `open` where
+   availability matters more.
+3. **Make blocks visible in the app's own result.** Pass
+   `configure_guard(on_verdict=…)` to add blocked or denied verdicts to the
+   run's output (e.g. a "blocked by policy" list).
+4. **Verify.** Create a rule that blocks one tool by name
+   (`toolName==<tool>`, ENFORCE, `TOOL_CALL`) and run the agent. The tool must
+   not run, the result must show the block, and the dashboard's enforcement log
+   must list it under the run's session.
+
+Defaults: TOOL_CALL timeout 1.5 s, TOOL_RESULT 5 s, results over 64 KB sent
+truncated. Generators (streaming tools) are refused.
+
+### If the app uses Microsoft AGT (Agent Governance Toolkit)
+
+Keep AGT, and make Darkhunt its policy. Give the AGT manifest a
+`type: custom, adapter: darkhunt` policy on `pre_tool_call` / `post_tool_call`,
+and pass `policy_dispatcher=DarkhuntPolicy()` (`darkhunt_telemetry.agt`). The
+README's AGT section has the manifest. Then:
+
+* **AGT's framework adapters don't cover tools.** `guard_openai_agents_runner`
+  and similar check only a run's input and output. Wire the tools where they are
+  dispatched:
+  * `@agt_tool(control)` under the framework's decorator, for a tool function
+    (a sync function stays sync);
+  * `await run_governed(control, name, args, execute)` (or `run_governed_sync`),
+    for a loop that dispatches by name. `execute()` must return something JSON:
+    AGT puts the result in its snapshot.
+  * `await check_tool_point(control, "pre_tool_call" | "post_tool_call", name, args, result=…)`,
+    for allow/deny hooks only, e.g. Claude Agent SDK `PreToolUse` / `PostToolUse`.
+    A hook can't withhold a built-in tool's output; it can only tell the model
+    not to use it.
+* **Pass the run explicitly** (`host=trace`) when the call isn't inside
+  `trace.activate()`. ACS evaluates the policy in a thread pool that drops
+  context variables.
+* **Requirements:** pin `agent-control-specification==0.3.1b1`, the version
+  shipped with AGT's latest official release (v4.1.0). Manifests must declare
+  `agent_control_specification_version: 0.3.1-beta`. It's a pre-release, needs
+  Python 3.11+, and is a Rust extension (PyPI wheels are Linux x86-64 only).
+  Keep it optional in the host app. Only `allow` / `deny` / `warn` are mapped.
+
 ## Data masking
 
 There is no client-side masking and no `mask=` option: inputs/outputs/messages/system
@@ -650,3 +747,10 @@ inline above.
    the topology shape (correct-when-independent) proactively.
 10. **Verifying with a throwaway probe under a different `serviceName`** → permanent
     phantom node. Use the curl probe + the real path.
+11. **`@guard` above the framework's tool decorator** → it wraps a tool *object*,
+    not a function, and raises `TypeError`. Put it underneath.
+12. **`enforce` without `DARKHUNT_GUARD_FAIL`** → `ValueError` at configuration.
+    Choose `open` or `closed` deliberately.
+13. **Guarded tools called outside the run** → checks carry no session, so
+    session rules can't apply and the enforcement log can't group them. Wrap the
+    run in `trace.activate()` (or pass `host=` on the AGT helpers).

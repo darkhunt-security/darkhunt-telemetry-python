@@ -23,6 +23,9 @@ Python idioms (keyword arguments, `with` context managers).
 - **`Trace`** — a single user-facing interaction. Carries routing fields.
 - **`Generation`** — one LLM round-trip under a trace (`model`, messages, `usage`, `cost`).
 - **`Span`** — anything else (tool calls, retrievals, guardrails, sub-agents).
+- **`@guard`** — asks Darkhunt before a tool runs and before its output is used,
+  so dashboard rules can block it ([Guard tool calls](#guard-tool-calls-guard);
+  optionally [through Microsoft AGT](#microsoft-agent-governance-toolkit-optional-experimental)).
 
 Requires Python **3.9+**.
 
@@ -344,6 +347,137 @@ or batch boundary (classic RAG `ingest`→`answer`) — have no such chain, so t
 render as **separate, unconnected nodes**. That's the honest picture, not a
 misconfiguration. Connecting them is an *architecture change* (carry a
 `handoff_token()` across the boundary), not a telemetry setting.
+
+## Guard tool calls (`@guard`)
+
+`@guard` asks Darkhunt before a tool runs, and before its output is used, so the
+rules in the Darkhunt dashboard can **stop** a call, not only record it. Each
+guarded call makes up to two checks against the guardrail manager's `/verify`:
+
+- **`TOOL_CALL`**, with the arguments, before the function runs. A block means
+  the function never runs.
+- **`TOOL_RESULT`**, with what it returned (`after=True`, the default). A block
+  means it ran but its output is withheld.
+
+```python
+from darkhunt_telemetry.guard import configure_guard, guard
+
+configure_guard(mode="enforce", fail="open")      # or DARKHUNT_GUARD_* env vars
+
+@function_tool          # your framework's decorator on top...
+@guard                  # ...guard underneath, so the framework still reads the real signature
+def send_referral(to: str, subject: str, message: str) -> dict: ...
+
+with trace.activate():  # the run the checks belong to (session, user, routing)
+    result = agent.run(...)
+```
+
+It wraps the function itself, so it works with any framework (or none), sync or
+async. Each check is recorded as a `guardrail` span under the tool's span, and
+reuses the tool span when you already opened one for the same tool.
+
+**What the caller gets on a block (`on_deny`):**
+
+| `on_deny`             | Result                                                                                       | For                                         |
+| --------------------- | -------------------------------------------------------------------------------------------- | ------------------------------------------- |
+| `"return"` (default)  | a string: *"Blocked by Darkhunt: \<rule\>. The \<tool\> tool was not run."*                    | tools a model calls: it reads the refusal   |
+| `"raise"`             | `DarkhuntBlocked(verdict)`                                                                   | code paths that cannot continue             |
+| a callable            | its return value, given the `Verdict` (e.g. `lambda v: []`)                                  | pipelines that can continue without the data |
+
+**Modes and failure.** `off` makes no calls. `shadow` (the default) checks and
+records but never blocks: a DENY is recorded as *"Would block (shadow)"*.
+`enforce` blocks on DENY. When Darkhunt does not answer (timeout, network,
+HTTP error), `fail="open"` lets the call through and `fail="closed"` blocks it.
+Enforce mode **requires** an explicit `fail`.
+
+| Option (`configure_guard(...)`) | Env var                         | Default                                   |
+| ------------------------------- | ------------------------------- | ----------------------------------------- |
+| `url`                           | `DARKHUNT_GUARD_URL`            | `https://api.darkhunt.ai/guardrail-manager` |
+| `api_key`                       | `DARKHUNT_API_KEY`              | —                                         |
+| `tenant_id` / `workspace_id` / `application_id` | `DARKHUNT_TENANT_ID` / … | taken from the active trace first   |
+| `mode`                          | `DARKHUNT_GUARD_MODE`           | `shadow`                                  |
+| `fail`                          | `DARKHUNT_GUARD_FAIL`           | — (required for `enforce`)                |
+| `call_timeout_s`                | `DARKHUNT_GUARD_TIMEOUT_CALL`   | `1.5` s                                   |
+| `result_timeout_s`              | `DARKHUNT_GUARD_TIMEOUT_RESULT` | `5.0` s                                   |
+| `max_result_bytes`              | `DARKHUNT_GUARD_MAX_RESULT`     | `65536` (larger results are sent truncated) |
+| `headers`                       | `DARKHUNT_GUARD_HEADERS`        | — (`K=V,K2=V2`)                            |
+| `on_verdict`                    | —                               | — (a hook called with every `Verdict`)    |
+
+Notes:
+
+- **Name tools the way your rules match them:** `@guard(name="db.get_patient")`.
+- **Framework context objects are not sent.** `self`, `ctx`, `context`,
+  `run_context` and `wrapper` are left out by default (`exclude=`).
+- **Call guarded tools inside the run.** `with trace.activate():` makes a trace
+  current without ending it. Outside a trace the checks still run on the
+  configured routing, but carry no session.
+- **Generators are refused.** Streaming tools cannot be guarded yet.
+
+## Microsoft Agent Governance Toolkit (optional, experimental)
+
+If your agents already use Microsoft's
+[Agent Governance Toolkit](https://github.com/microsoft/agent-governance-toolkit)
+(AGT), Darkhunt can be the policy behind it. AGT's Agent Control Specification
+(ACS) runtime stops an agent at intervention points and asks a policy for a
+verdict. `DarkhuntPolicy` answers `pre_tool_call` and `post_tool_call` with
+`/verify`, so the decisions follow the same dashboard rules, enforcement log and
+`guardrail` spans as `@guard`.
+
+```yaml
+# agt.yaml
+agent_control_specification_version: 0.3.1-beta
+metadata: {name: my-agent}
+policies:
+  darkhunt: {type: custom, adapter: darkhunt}
+intervention_points:
+  pre_tool_call:  {policy: {id: darkhunt}, policy_target: $.tool_call.args}
+  post_tool_call: {policy: {id: darkhunt}, policy_target: $.tool_result}
+annotators: {}
+```
+
+```python
+from agent_control_specification import AgentControl
+from darkhunt_telemetry.agt import DarkhuntPolicy, agt_tool, run_governed, check_tool_point
+
+control = AgentControl.from_path("agt.yaml", policy_dispatcher=DarkhuntPolicy())
+
+@function_tool
+@agt_tool(control)              # a tool function (sync stays sync)
+def get_holdings(household_id: str) -> str: ...
+
+# a loop that dispatches tools by name:
+out = await run_governed(control, block.name, block.input, lambda: run(block))
+
+# allow/deny hooks only (e.g. the Claude Agent SDK's PreToolUse / PostToolUse):
+refusal = await check_tool_point(control, "pre_tool_call", tool_name, tool_input)
+```
+
+What to know:
+
+- **Install AGT yourself, at the supported version.** `DarkhuntPolicy` reads
+  the guard configuration above. AGT is not a dependency of this SDK. Install
+  the version shipped with AGT's latest official release (v4.1.0), and pin it
+  exactly: the spec is a pre-release and may change between versions.
+
+  ```bash
+  pip install "agent-control-specification==0.3.1b1"
+  ```
+
+  Manifests must declare `agent_control_specification_version: 0.3.1-beta`.
+  It needs Python 3.11+ and is a native (Rust) extension: PyPI has a wheel
+  for Linux x86-64 only, and elsewhere it builds from source, which needs a
+  Rust toolchain.
+- **AGT's framework adapters guard a run's input and output, not the tools
+  inside it.** Put `agt_tool` / `run_governed` where your tools are dispatched.
+- **Hand the run in explicitly.** ACS evaluates policies in a thread pool that
+  drops context variables. `agt_tool`, `run_governed` and `check_tool_point`
+  pass the current run through for you; with AGT's own adapters, put the session
+  in the snapshot's `envelope`.
+- **`DarkhuntPolicy` never raises.** ACS turns a dispatcher error into a deny, so
+  the plug-in applies your `fail` mode itself.
+- **Only `allow`, `deny` and `warn` are mapped.** ACS's `transform` (redact) and
+  `escalate` (approval) have no Darkhunt equivalent yet. Observe-only matches
+  and shadow-mode DENYs come back as `warn`.
 
 ## Development
 

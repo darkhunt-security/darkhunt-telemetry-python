@@ -9,12 +9,14 @@ caller and records an ``agent_handoff`` link) and :meth:`handoff_token`.
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Any, List, Literal, Optional, Sequence, Type, Union
+from contextlib import contextmanager
+from typing import TYPE_CHECKING, Any, Iterator, List, Literal, Optional, Sequence, Type, Union
 
 from opentelemetry import context as context_api
 from opentelemetry import trace as trace_api
 from opentelemetry.context import Context
 
+from ._current import use_observation
 from .attributes import ATTR
 from .span import (
     ActiveChildHost,
@@ -240,6 +242,29 @@ class Trace(ActiveChildHost):
         from .span import _to_nanos
 
         self._root_span.end(end_time=_to_nanos(end_time))
+
+    @contextmanager
+    def activate(self) -> Iterator["Trace"]:
+        """Make this trace the current run for the ``with`` block.
+
+        Two things become current: the root span, in the ambient OTel context
+        (so spans opened without an explicit parent nest under it), and this
+        trace, as :func:`~darkhunt_telemetry.current_observation` — which is how
+        code the agent framework calls, such as a guarded tool, finds the run it
+        belongs to.
+
+        Lifecycle is unchanged: this neither starts nor ends the trace. Combine
+        it with the trace's own ``with`` block when you want both::
+
+            with dh.trace("claims", session_id=claim_id) as t, t.activate():
+                ...
+        """
+        token = context_api.attach(self._root_context)
+        try:
+            with use_observation(self):
+                yield self
+        finally:
+            context_api.detach(token)
 
     # --- context manager (lifecycle only) ---
     def __enter__(self) -> "Trace":

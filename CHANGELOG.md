@@ -15,6 +15,32 @@ published patch.
 
 ## [Unreleased]
 
+### Added
+
+- **`@guard` — Darkhunt enforcement on tool calls** (`darkhunt_telemetry.guard`).
+  - **The checks:** a guarded function is checked against the guardrail
+    manager's `/verify` before it runs (`TOOL_CALL`) and before its output is used
+    (`TOOL_RESULT`), so dashboard rules can block the call or withhold the result.
+  - **Behaviour:** framework-agnostic, sync and async. Modes are
+    `off` / `shadow` / `enforce`, with an explicit `fail="open" | "closed"`.
+  - **On a block** (`on_deny`): return a refusal string, raise
+    `DarkhuntBlocked`, or call your own function.
+  - **Recording:** each check is a `guardrail` span under the tool's span.
+  - **Configuration:** `configure_guard()` or `DARKHUNT_GUARD_*`.
+- **`Trace.activate()`** makes a trace the current run for a block of code
+  without ending it, and **`current_observation()`** returns that run. The
+  `start_active_*` helpers now also set the current observation.
+- **Microsoft Agent Governance Toolkit (AGT) plug-in** (`darkhunt_telemetry.agt`, optional, experimental).
+  - **`DarkhuntPolicy`:** an ACS `custom` policy (`adapter: darkhunt`) that
+    decides `pre_tool_call` / `post_tool_call` with `/verify`.
+  - **Entry points:**
+    - `agt_tool` for a tool function;
+    - `run_governed` / `run_governed_sync` for loops that dispatch tools by name;
+    - `check_tool_point` for allow/deny hooks.
+  - **Version:** targets `agent-control-specification==0.3.1b1`, the version in
+    AGT's latest official release, v4.1.0 (Python 3.11+). Install it
+    separately; it is not a dependency.
+
 ### Changed
 
 - **Trace tags, release, environment and metadata are now set on every span**, not
