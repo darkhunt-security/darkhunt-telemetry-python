@@ -1,24 +1,6 @@
 ---
 name: darkhunt-telemetry-python-integration
-description: |
-  Use this skill when integrating `darkhunt-telemetry` (the Darkhunt trace-hub
-  PYTHON SDK, published on PyPI) into a
-  Python service. Covers: install (published on PyPI), singleton client setup,
-  trace + generation + span emission via the `with`-based active-context helpers,
-  backdated `start_time`, graceful shutdown, routing-field discipline (tenant_id /
-  workspace_id / application_id), creating an OBSERVABILITY application via the
-  Darkhunt MCP, in-cluster vs public ingest, and — the big part
-  — multi-agent topology + agent handoffs across every Python transport (an
-  in-process contextvars carrier, orchestrator-passed traces, a LangGraph state
-  field, the HTTP `traceparent` header, a queue metadata field, and Temporal
-  Headers via `HandoffInterceptor` + `child_args`). Auto-invoke when the user asks
-  to add LLM tracing/observability to a Python app, send spans to trace-hub, wire
-  `DarkhuntTelemetry` / `client.trace()` / `trace.generation()`, or build a
-  multi-agent Python system where agents hand off to each other (agent topology).
-  Also covers guarding tool calls with `@guard` (Darkhunt rules block a call before it
-  runs or withhold its output) and plugging Darkhunt in as the policy behind
-  Microsoft's Agent Governance Toolkit (AGT). Auto-invoke when the user asks to
-  guard, block or enforce policy on an agent's tool calls, or to integrate AGT.
+description: "Darkhunt telemetry for PYTHON services (the darkhunt-telemetry SDK on PyPI). Use when the user asks to add Darkhunt telemetry, LLM tracing or observability to a Python app, send spans to Darkhunt trace-hub, or wire DarkhuntTelemetry, client.trace() or trace.generation() calls. Covers install, the process-wide client, trace, generation and span emission with the with-based helpers, routing fields (tenant_id, workspace_id, application_id), shutdown, verification, and multi-agent topology with handoffs (contextvars, LangGraph state, HTTP traceparent, queue metadata, Temporal headers). Also use when the user asks to guard, block or enforce policy on an agent's tool calls with @guard, or to plug Darkhunt into Microsoft's Agent Governance Toolkit (AGT)."
 ---
 
 # Darkhunt telemetry Python SDK — integration guide
@@ -65,16 +47,16 @@ Key shapes:
 The SDK is published on public PyPI as **`darkhunt-telemetry`**. Install it directly:
 
 ```bash
-pip install "darkhunt-telemetry[temporal]"
+pip install darkhunt-telemetry
 # or, with uv:
-uv add "darkhunt-telemetry[temporal]"
+uv add darkhunt-telemetry
 ```
 
 or declare it as a project dependency:
 
 ```toml
 # pyproject.toml
-dependencies = ["darkhunt-telemetry[temporal]"]
+dependencies = ["darkhunt-telemetry"]
 ```
 
 then `uv sync`. Releases are **continuous** — every merge to the SDK's `main`
@@ -82,9 +64,9 @@ publishes `0.5.<build>` to PyPI, so the newest release is always the latest.
 Leave the spec unpinned to track latest, or set a floor (`>=0.5.13`) / pin an
 exact version for reproducibility.
 
-**Extras:** `[temporal]` pulls in `temporalio` (only needed for the Temporal
-handoff interceptors). The core package does not import it, so it loads with zero
-Temporal packages installed.
+**Extras:** `[temporal]` pulls in `temporalio`, which only the Temporal handoff
+interceptors need. Install `darkhunt-telemetry[temporal]` only when the service
+uses Temporal; the core package never imports it.
 
 Because it installs from PyPI, **Docker builds just work** — `pip install` /
 `uv sync` pulls the wheel inside the image, with no build-context tricks.
@@ -124,7 +106,30 @@ constructor raises `ValueError: api_key is required for the public endpoint`.
 > from that field, **append `/trace-hub` yourself** — the exporter posts to
 > `{base_url}/otlp/t/{tenant_id}/v1/traces`, so dropping it yields 404.
 
+> **The key is in `.env`? Leave the file closed.** Opening, `cat`-ing or printing
+> `.env` sends the key to the model and into the session transcript, which is
+> exactly what keeping it out of the prompt avoids. Check that it is set without
+> revealing it (`grep -c '^DARKHUNT_API_KEY=' .env` prints a count, not the value),
+> and never copy the key into source, committed config, or your report.
+
+**When the user hands you the routing IDs** (the dashboard's onboarding prompt
+includes `DARKHUNT_TENANT_ID`, `DARKHUNT_WORKSPACE_ID` and
+`DARKHUNT_APPLICATION_ID`), they are not secrets: add them next to the key, still
+without printing the file, and add the variable names (no values) to `.env.example`
+if the project keeps one.
+
+```bash
+[ -s .env ] && [ -n "$(tail -c1 .env)" ] && echo >> .env   # end .env with a newline first
+for kv in DARKHUNT_TENANT_ID=<tenant> DARKHUNT_WORKSPACE_ID=<workspace> DARKHUNT_APPLICATION_ID=<app>; do
+  grep -q "^${kv%%=*}=" .env 2>/dev/null || echo "$kv" >> .env
+done
+```
+
 ### 2b. Create an OBSERVABILITY application (get the `application_id`)
+
+**Already given a `DARKHUNT_APPLICATION_ID`? Use it and skip this step.** The
+dashboard's onboarding prompt passes the ID of a dedicated OBSERVABILITY app it
+has just created; making another one would split the traces.
 
 Every trace needs an `application_id` (a workspace-scoped UUID). **Create a new,
 dedicated OBSERVABILITY app** for the integration — do not reuse a random existing
@@ -133,7 +138,8 @@ domain / service group** is typical (agents within a domain are told apart by
 `service.name`).
 
 **Reach for the Darkhunt MCP first** (it reuses enrolled credentials). Check the
-`darkhunt_*` tools are connected, then:
+`darkhunt_*` tools are connected (agents may prefix the names, e.g.
+`mcp__darkhunt__darkhunt_status`), then:
 
 ```text
 darkhunt_status                # confirm auth + tenant + reachable API
@@ -147,6 +153,22 @@ darkhunt_create_application    { workspace, name, type: 'OBSERVABILITY', descrip
 - Put each UUID in `DARKHUNT_APP_<DOMAIN>` (or `DARKHUNT_APPLICATION_ID` for a
   single-app service). If MCP + CLI are both unavailable, use the dashboard's
   new-application flow; don't silently curl the REST API.
+
+### 2c. Make sure the service actually loads `.env`
+
+The SDK reads `os.environ` only — it never opens `.env` itself. If nothing in the
+service loads that file, the variables are missing at runtime, the gate in §4
+switches telemetry off, and nothing is sent: no error, and the dashboard keeps
+waiting for a first trace. Find out how this service gets its configuration
+before you finish:
+
+- **It already loads `.env`** (python-dotenv, pydantic-settings `env_file`,
+  django-environ, a framework CLI, `docker compose` `env_file:`): make sure that
+  runs **before** the module that constructs the client is imported.
+- **Nothing loads it:** add `python-dotenv` and call `load_dotenv()` at the very
+  top of the entrypoint, and say so in your report.
+- **It is configured only through the deployment's environment:** don't add a
+  loader; tell the user which `DARKHUNT_*` variables must be set there.
 
 ### 3. Singleton client (process-wide)
 
@@ -196,10 +218,16 @@ presence and return `None` when unconfigured; call sites use `if trace:` /
 `trace.end() if trace else None`:
 
 ```python
+import logging
 import os
 
 _REQUIRED = ("DARKHUNT_API_KEY", "DARKHUNT_TENANT_ID", "DARKHUNT_WORKSPACE_ID")
 _ENABLED = os.environ.get("DARKHUNT_ENABLED") != "false" and all(os.environ.get(k) for k in _REQUIRED)
+if not _ENABLED and os.environ.get("DARKHUNT_ENABLED") != "false":
+    # Say why once, by name only, so a missing .env doesn't fail silently.
+    logging.getLogger(__name__).warning(
+        "Darkhunt telemetry disabled; missing %s", [k for k in _REQUIRED if not os.environ.get(k)]
+    )
 
 def open_agent_trace(domain, agent, *, session_id, user_id, handoff_from=None, input=None):
     if not _ENABLED:
@@ -671,14 +699,19 @@ After wiring:
    absent key; **404** = missing `/trace-hub`:
 
    ```bash
-   curl -s -o /dev/null -w '%{http_code}\n' -X POST \
-     -H "Authorization: Bearer $DARKHUNT_API_KEY" \
-     -H 'Content-Type: application/x-protobuf' \
-     -H "X-Workspace-Id: $DARKHUNT_WORKSPACE_ID" \
-     -H "X-Application-Id: $DARKHUNT_APPLICATION_ID" \
-     --data-binary '' \
-     "$DARKHUNT_BASE_URL/otlp/t/$DARKHUNT_TENANT_ID/v1/traces"
+   ( set -a; . ./.env; set +a   # load .env into this subshell only; never print it
+     curl -s -o /dev/null -w '%{http_code}\n' -X POST \
+       -H "Authorization: Bearer $DARKHUNT_API_KEY" \
+       -H 'Content-Type: application/x-protobuf' \
+       -H "X-Workspace-Id: $DARKHUNT_WORKSPACE_ID" \
+       -H "X-Application-Id: $DARKHUNT_APPLICATION_ID" \
+       --data-binary '' \
+       "${DARKHUNT_BASE_URL:-https://api.darkhunt.ai/trace-hub}/otlp/t/$DARKHUNT_TENANT_ID/v1/traces" )
    ```
+
+   Drop the first line if the variables are already exported. `. ./.env` runs the
+   file as shell; if it isn't shell-compatible, export the variables another way,
+   never by printing the file.
 
 4. **Run the REAL instrumented path** and read its node in the dashboard. Verify with
    the same `service.name` as the integration — a probe under a *different*
@@ -691,7 +724,12 @@ The dashboard should show: one session-grouped trace per interaction; generation
 rendered as chat bubbles with `input_messages`/`output_messages`; routing attributes
 on the span detail; and token usage / model / computed cost on generations.
 
-## On completion, report the topology shape to the user
+## On completion, report back to the user
+
+Report, in this order: the files you changed and why; where each `DARKHUNT_*`
+variable is set (never the key's value); the curl probe's status code; what the
+user still has to do (restart the service, set the variables in deployment, send
+one real request); and the topology shape below.
 
 Finishing the wiring is not the last step — tell the user what the Topology tab will
 (and won't) show, proactively, before they open it. A **connected** graph (real
@@ -727,8 +765,9 @@ inline above.
 1. **Constructing the client per call** → leaks. Memoize per `(application_id,
    service_name)`.
 2. **Pinning to an unpublished local checkout when PyPI is fine** → drift from the
-   released SDK. Prefer `pip install "darkhunt-telemetry[temporal]"` from PyPI (§1);
-   reserve the local-path/git deps for hacking on the SDK or pinning an unreleased ref.
+   released SDK. Prefer `pip install darkhunt-telemetry` from PyPI (§1; add
+   `[temporal]` only for Temporal); reserve the local-path/git deps for hacking on
+   the SDK or pinning an unreleased ref.
 3. **No signal-driven shutdown** → SIGTERM loses the in-memory batch. Wire
    `shutdown()` in a `finally`.
 4. **Missing `start_time` on the MANUAL form** → ~0ms duration. Prefer the
@@ -754,3 +793,8 @@ inline above.
 13. **Guarded tools called outside the run** → checks carry no session, so
     session rules can't apply and the enforcement log can't group them. Wrap the
     run in `trace.activate()` (or pass `host=` on the AGT helpers).
+14. **Reading `.env` to check the key** → the key lands in the model's context and
+    the transcript. Check with `grep -c`, and load it into a subshell only for the
+    curl probe.
+15. **A service that never loads `.env`** → the gate disables telemetry without an
+    error and the dashboard waits forever. See §2c.
