@@ -1,0 +1,9 @@
+{
+  "skills": [
+    {
+      "name": "darkhunt-telemetry-python-integration",
+      "version": "318b18b1385e9b03344f00d8144d7a04cf85b8220267ea4f9311446af15ee53e",
+      "files": ["SKILL.md"]
+    }
+  ]
+}

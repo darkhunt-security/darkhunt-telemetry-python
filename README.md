@@ -32,14 +32,21 @@ Python idioms (keyword arguments, `with` context managers).
 
 Requires Python **3.9+**.
 
-> **Let Claude Code wire it up for you.** Install the plugin:
+> **Let your coding agent wire it up for you.** In Claude Code, install the plugin:
 >
 > ```
-> /plugin marketplace add darkhunt-security/darkhunt-telemetry-python
-> /plugin install darkhunt-telemetry-py@darkhunt-py
+> /plugin marketplace add darkhunt-security/darkhunt
+> /plugin install darkhunt-telemetry-py@darkhunt
 > ```
 >
 > Then tell Claude _"add Darkhunt telemetry to this service"_ and the [`darkhunt-telemetry-python-integration`](https://github.com/darkhunt-security/darkhunt-telemetry-python/blob/main/plugins/darkhunt-telemetry-py/skills/darkhunt-telemetry-python-integration/SKILL.md) skill auto-invokes and does the steps below for you.
+>
+> The same skill works in **Amp** and **OpenCode**:
+>
+> - **Amp:** run `amp skill add darkhunt-security/darkhunt-telemetry-python/plugins/darkhunt-telemetry-py` in your repo root. Add `--global` to use it in every project; run it again with `--overwrite` to update.
+> - **OpenCode** (1.17.12 or later): add `"skills": { "urls": ["https://raw.githubusercontent.com/darkhunt-security/darkhunt-telemetry-python/main/plugins/darkhunt-telemetry-py/skills/"] }` to `opencode.json`, then restart OpenCode. New versions of the skill arrive on their own.
+>
+> In either, start your prompt with _"Use the darkhunt-telemetry-python-integration skill."_
 
 ---
 
